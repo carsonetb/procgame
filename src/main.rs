@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use avian2d::prelude::*;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
@@ -7,12 +9,16 @@ use bevy::{
     render::render_resource::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
+    time::common_conditions::on_timer,
     window::WindowResized,
 };
 use bevy_ecs_tilemap::prelude::*;
 
 use crate::{
-    body::{Elbow, Facing, Leg, Legged, Locomotor},
+    body::{
+        BodyHead, BodyLegs, ConnectedBodies, Elbow, Facing, Leg, Legged, Locomotor,
+        PreviousVelocity,
+    },
     creature::Prey,
     environment::{AuditoryEventType, EventType, SenseEvent},
     food::Food,
@@ -22,6 +28,7 @@ use crate::{
 mod body;
 mod brain;
 mod creature;
+mod editor;
 mod environment;
 mod food;
 mod predator;
@@ -207,65 +214,93 @@ fn spawn_rigidbody(
         return;
     };
 
-    commands.spawn((
-        Legged {
-            facing: Facing::Left,
-            legs: vec![
-                Leg::new(
-                    vec![Vec2::new(0.4, -1.0), Vec2::new(0.8, -0.2)],
-                    Vec2::new(0.3, -1.0),
-                    25.0,
-                    80.0,
-                    8.0,
-                    22.0,
-                    Elbow::Down,
-                ),
-                Leg::new(
-                    vec![Vec2::new(-0.2, -1.0), Vec2::new(0.8, -0.2)],
-                    Vec2::new(-0.3, -1.0),
-                    25.0,
-                    80.0,
-                    8.0,
-                    22.0,
-                    Elbow::Down,
-                ),
-                Leg::new(
-                    vec![
-                        Vec2::new(-0.8, 0.5),
-                        Vec2::new(0.0, 1.0),
-                        Vec2::new(0.5, 0.5),
-                    ],
-                    Vec2::new(-0.7, -1.0),
-                    30.0,
-                    80.0,
-                    8.0,
-                    22.0,
-                    Elbow::Up,
-                ),
-                Leg::new(
-                    vec![
-                        Vec2::new(-0.5, 0.5),
-                        Vec2::new(0.0, 1.0),
-                        Vec2::new(0.8, 0.5),
-                    ],
-                    Vec2::new(0.7, -1.0),
-                    30.0,
-                    80.0,
-                    8.0,
-                    22.0,
-                    Elbow::Up,
-                ),
-            ],
-        },
-        Locomotor {
-            desired_velocity: Vec2::new(0.0, 0.0),
-        },
-        RigidBody::Dynamic,
-        Restitution::new(0.1),
-        Mass(1.0),
-        Collider::circle(10.0),
-        Transform::from_xyz(cursor.x, cursor.y, 0.0),
-    ));
+    let legs = commands
+        .spawn((
+            BodyLegs,
+            PreviousVelocity(Vec2::ZERO),
+            Legged {
+                facing: Facing::Left,
+                legs: vec![
+                    Leg::new(
+                        vec![Vec2::new(0.4, -1.0), Vec2::new(0.5, -0.5)],
+                        Vec2::new(0.3, -1.0),
+                        25.0,
+                        160.0,
+                        16.0,
+                        22.0,
+                        Elbow::Down,
+                    ),
+                    Leg::new(
+                        vec![Vec2::new(-0.2, -1.0), Vec2::new(0.5, -0.5)],
+                        Vec2::new(-0.3, -1.0),
+                        25.0,
+                        160.0,
+                        16.0,
+                        22.0,
+                        Elbow::Down,
+                    ),
+                ],
+            },
+            Locomotor {
+                desired_velocity: Vec2::new(0.0, 0.0),
+            },
+            RigidBody::Dynamic,
+            Restitution::new(0.1),
+            Mass(1.0),
+            Collider::circle(10.0),
+            Transform::from_xyz(cursor.x, cursor.y, 0.0),
+        ))
+        .id();
+
+    let arms = commands
+        .spawn((
+            BodyHead,
+            Legged {
+                facing: Facing::Left,
+                legs: vec![
+                    Leg::new(
+                        vec![
+                            Vec2::new(-0.8, 0.5),
+                            Vec2::new(0.0, 1.0),
+                            Vec2::new(0.5, 0.5),
+                        ],
+                        Vec2::new(-0.7, -1.0),
+                        30.0,
+                        80.0,
+                        8.0,
+                        22.0,
+                        Elbow::Up,
+                    ),
+                    Leg::new(
+                        vec![
+                            Vec2::new(-0.5, 0.5),
+                            Vec2::new(0.0, 1.0),
+                            Vec2::new(0.8, 0.5),
+                        ],
+                        Vec2::new(0.7, -1.0),
+                        30.0,
+                        80.0,
+                        8.0,
+                        22.0,
+                        Elbow::Up,
+                    ),
+                ],
+            },
+            Locomotor {
+                desired_velocity: Vec2::new(0.0, 0.0),
+            },
+            RigidBody::Dynamic,
+            Restitution::new(0.1),
+            Mass(0.5),
+            Collider::circle(10.0),
+            Transform::from_xyz(cursor.x, cursor.y, 0.0),
+            ConnectedBodies(vec![legs]),
+        ))
+        .id();
+
+    commands.entity(legs).insert(ConnectedBodies(vec![arms]));
+
+    commands.spawn(DistanceJoint::new(legs, arms).with_limits(0.0, 20.0));
 }
 
 fn camera_movement(
@@ -275,16 +310,16 @@ fn camera_movement(
 ) {
     for mut transform in query {
         let mut direction = Vec3::ZERO;
-        if keyboard_input.pressed(KeyCode::KeyA) {
+        if keyboard_input.pressed(KeyCode::ArrowLeft) {
             direction += Vec3::new(-1.0, 0.0, 0.0);
         }
-        if keyboard_input.pressed(KeyCode::KeyD) {
+        if keyboard_input.pressed(KeyCode::ArrowRight) {
             direction += Vec3::new(1.0, 0.0, 0.0);
         }
-        if keyboard_input.pressed(KeyCode::KeyW) {
+        if keyboard_input.pressed(KeyCode::ArrowUp) {
             direction += Vec3::new(0.0, 1.0, 0.0);
         }
-        if keyboard_input.pressed(KeyCode::KeyS) {
+        if keyboard_input.pressed(KeyCode::ArrowDown) {
             direction += Vec3::new(0.0, -1.0, 0.0);
         }
         transform.translation += direction * 500.0 * time.delta_secs();
@@ -300,13 +335,20 @@ fn main() {
         // PhysicsDebugPlugin,
     ));
     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
+    app.insert_gizmo_config(
+        DefaultGizmoConfigGroup,
+        GizmoConfig {
+            depth_bias: 0.5,
+            ..default()
+        },
+    );
     app.add_systems(
         Startup,
         (
             setup,
-            create_creatures,
-            create_predators,
-            create_foods,
+            // create_creatures,
+            // create_predators,
+            // create_foods,
             tilemap::setup,
         ),
     );
@@ -319,12 +361,12 @@ fn main() {
             // camera_movement,
             tilemap::depth,
             body::render,
-            Prey::process,
-            Prey::eat,
-            Predator::process,
-            Predator::attack,
-            Food::process,
-            SenseEvent::process,
+            // Prey::process,
+            // Prey::eat,
+            // Predator::process,
+            // Predator::attack,
+            // Food::process,
+            // SenseEvent::process,
         ),
     );
     app.add_systems(
@@ -336,8 +378,41 @@ fn main() {
             body::keyboard_movement,
             body::stand,
             body::locomote,
+            body::jump,
             body::animate,
+            body::balance,
         ),
     );
     app.run();
 }
+
+// fn main() {
+//     let mut app = App::new();
+//     app.add_plugins((
+//         DefaultPlugins.set(ImagePlugin::default_nearest()),
+//         TilemapPlugin,
+//         PhysicsPlugins::default(),
+//     ));
+//     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
+//     app.add_systems(Startup, (prerender::setup, editor::setup).chain());
+//     app.add_systems(
+//         Update,
+//         (
+//             editor::select_atlas,
+//             editor::select_layer,
+//             editor::select_layer_owner,
+//             editor::edit_tiles,
+//             editor::own_layers,
+//             (
+//                 prerender::clean,
+//                 prerender::bitmap_tile,
+//                 prerender::render_tile,
+//                 prerender::render_level,
+//             )
+//                 .chain()
+//                 .run_if(input_just_pressed(KeyCode::Space)),
+//             prerender::remove_example.run_if(input_just_pressed(KeyCode::Enter)),
+//         ),
+//     );
+//     app.run();
+// }

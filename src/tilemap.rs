@@ -146,7 +146,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         texture_handle.clone(),
         MapType::Command,
         0.0,
-        0,
+        1,
     );
     create_tilemap(
         &mut commands,

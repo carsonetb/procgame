@@ -14,10 +14,12 @@ linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
 [dependencies]
-bevy = { version = "0.19.0", features = ["debug", "dynamic_linking"] }
+bevy = { version = "0.18.1", features = ["debug", "dynamic_linking"] }
+bevy_ecs_tilemap = { version = "0.18.1", features = ["atlas"] }
 rand = "0.10.1"
 log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
-bevy_ecs_tilemap = { version = "0.18.1", features = ["atlas"] }
 phf = "0.13.1"
 phf_macros = "0.13.1"
 avian2d = { version = "0.6.1", features = ["debug-plugin"] }
+bitflags = "2.13.0"
+bevy_feathers = "0.19.0"

@@ -7,6 +7,18 @@ pub enum Elbow {
     Up,
 }
 
+#[derive(Component, Debug, Clone)]
+pub struct ConnectedBodies(pub Vec<Entity>);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BodyHead;
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct BodyLegs;
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PreviousVelocity(pub Vec2);
+
 impl Elbow {
     fn with_facing(&self, facing: Facing) -> Self {
         match self {
@@ -96,17 +108,18 @@ pub fn keyboard_movement(
     query: Query<(&mut Legged, &mut Locomotor)>,
 ) {
     let mut movement = Vec2::ZERO;
-    if input.pressed(KeyCode::ArrowLeft) {
+    if input.pressed(KeyCode::KeyA) {
         movement += Vec2::new(-100.0, 0.0);
     }
-    if input.pressed(KeyCode::ArrowRight) {
+    if input.pressed(KeyCode::KeyD) {
         movement += Vec2::new(100.0, 0.0);
     }
-    if input.pressed(KeyCode::ArrowUp) {
-        movement += Vec2::new(0.0, 100.0);
-    }
-    if input.pressed(KeyCode::ArrowDown) {
+    if input.pressed(KeyCode::KeyS) {
         movement += Vec2::new(0.0, -70.0);
+    }
+    if input.pressed(KeyCode::KeyW) {
+        movement.y = 0.0;
+        movement += Vec2::new(0.0, 100.0);
     }
     for (mut legged, mut locomotor) in query {
         locomotor.desired_velocity = movement;
@@ -120,12 +133,28 @@ pub fn keyboard_movement(
 
 pub fn stand(
     spatial_query: SpatialQuery,
-    query: Query<(Entity, Forces, &mut Legged, &Transform), With<RigidBody>>,
+    query: Query<
+        (
+            Entity,
+            Forces,
+            &mut Legged,
+            &Transform,
+            Option<&ConnectedBodies>,
+        ),
+        With<RigidBody>,
+    >,
 ) {
-    for (entity, mut forces, mut legged, transform) in query {
+    for (entity, mut forces, mut legged, transform, connected) in query {
         let origin = transform.translation.xy();
         let scale = legged.facing.scale();
         for leg in &mut legged.legs {
+            let mut excluded = vec![entity];
+            if let Some(connected) = connected {
+                for connected in &connected.0 {
+                    excluded.push(*connected);
+                }
+            }
+
             let mut lowest_distance = f32::INFINITY;
             let mut lowest_data = None;
             for direction in &leg.directions {
@@ -135,7 +164,7 @@ pub fn stand(
                     Dir2::from_xy(direction.x, direction.y).unwrap(),
                     leg.length,
                     true,
-                    &SpatialQueryFilter::default().with_excluded_entities(vec![entity]),
+                    &SpatialQueryFilter::default().with_excluded_entities(excluded.clone()),
                 ) {
                     if hit_data.distance < lowest_distance {
                         lowest_distance = hit_data.distance;
@@ -161,8 +190,25 @@ pub fn stand(
     }
 }
 
-pub fn locomote(query: Query<(Forces, &Locomotor, &mut Legged), With<RigidBody>>) {
-    for (mut forces, locomotor, mut legged) in query {
+pub fn balance(
+    time: Res<Time>,
+    query: Query<(Forces, &ConnectedBodies), With<BodyHead>>,
+    mut other_query: Query<(Forces, &mut PreviousVelocity), Without<BodyHead>>,
+) {
+    for (mut forces, connected) in query {
+        let (other_forces, mut previous) = other_query.get_mut(connected.0[0]).unwrap();
+        let acceleration = previous.0 - other_forces.linear_velocity() / time.delta_secs();
+        forces.apply_force(
+            Vec2::new(0.0, 600.0)
+                - 0.01 * acceleration
+                - 2.0 * (forces.linear_velocity() - other_forces.linear_velocity()),
+        );
+        previous.0 = forces.linear_velocity();
+    }
+}
+
+pub fn locomote(mut query: Query<(Forces, &Locomotor, &mut Legged), With<RigidBody>>) {
+    for (mut forces, locomotor, mut legged) in query.iter_mut() {
         for leg in &mut legged.legs {
             if leg.stepping {
                 continue;
@@ -176,6 +222,34 @@ pub fn locomote(query: Query<(Forces, &Locomotor, &mut Legged), With<RigidBody>>
             let force =
                 40.0 * (locomotor.desired_velocity - forces.linear_velocity()) * (leverage - 0.05);
             forces.apply_force(force);
+        }
+    }
+}
+
+pub fn jump(query: Query<(Forces, &Locomotor, &Legged), With<BodyLegs>>) {
+    for (mut forces, locomotor, legged) in query {
+        if locomotor.desired_velocity.y > 0.0 && forces.linear_velocity().y > 0.0 {
+            for leg in &legged.legs {
+                if leg.stepping {
+                    continue;
+                }
+
+                let Some(hit_data) = leg.hit_data else {
+                    continue;
+                };
+
+                if hit_data.normal.x.abs() > 0.2 {
+                    continue;
+                }
+
+                let leverage = (1.0 - (hit_data.distance / leg.length - 0.7)).max(0.0);
+                forces.apply_linear_impulse(Vec2::new(
+                    (forces.linear_velocity().x.abs() * 0.02).max(1.0).min(1.5)
+                        * 10.0
+                        * forces.linear_velocity().x.signum(),
+                    (locomotor.desired_velocity.y * leverage.min(0.95)).min(60.0),
+                ));
+            }
         }
     }
 }
