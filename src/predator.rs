@@ -1,6 +1,7 @@
+use avian2d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{brain::*, creature::Prey, environment::*};
+use crate::{body::*, brain::*, creature::Prey, environment::*};
 
 #[derive(Debug, Clone, Copy)]
 pub enum PredatorAction {
@@ -10,112 +11,127 @@ pub enum PredatorAction {
 
 #[derive(Component)]
 pub struct Predator {
-    pub pos: Vec2,
+    desired_movement: Vec2,
     hunger: f32,
-    movement: Vec2,
     attacking: bool,
     walk_timer: Timer,
 }
 
 impl Predator {
-    pub fn setup(commands: &mut Commands, pos: Vec2) {
-        commands.spawn((
-            Self {
+    pub fn new() -> Self {
+        Self {
+            desired_movement: Vec2::ZERO,
+            hunger: 0.0,
+            attacking: false,
+            walk_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+        }
+    }
+
+    pub fn brain() -> Brain<SenseEvent, Action<PredatorAction>> {
+        Brain::new(vec![Box::new(AttackState::new())])
+    }
+}
+
+// pub fn setup(commands: &mut Commands, pos: Vec2) {
+//     commands.spawn((
+//         Self {
+//             desired_movement: Vec2::ZERO,
+//             hunger: 0.0,
+//             attacking: false,
+//             walk_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+//         },
+//         Brain::new(vec![Box::new(AttackState::new())]),
+//         Sprite::from_color(Color::srgb(1.0, 0.0, 0.0), Vec2::new(30.0, 30.0)),
+//         Transform::from_xyz(pos.x, pos.y, 0.0),
+//     ));
+// }
+
+pub fn attack(
+    mut commands: Commands,
+    predator_query: Query<(&mut Predator, &Transform)>,
+    prey_query: Query<(Entity, &Prey)>,
+) {
+    for (mut predator, transform) in predator_query {
+        if !predator.attacking {
+            continue;
+        }
+
+        let pos = transform.translation.xy();
+        for (prey_entity, prey) in prey_query {
+            if pos.distance(prey.pos) < 20.0 {
+                predator.hunger = 0.0;
+                commands.entity(prey_entity).despawn(); // TODO: Spawn dead version which can be carried.
+            }
+        }
+    }
+}
+
+pub fn process(
+    mut commands: Commands,
+    time: Res<Time>,
+    events_query: Query<&SenseEvent>,
+    predator_query: Query<(
+        Forces,
+        &mut Locomotor,
+        &mut Predator,
+        &mut Brain<SenseEvent, Action<PredatorAction>>,
+        &Transform,
+    )>,
+) {
+    // TODO: Unify a lot of this logic into a helper.
+    for (forces, mut locomotor, mut predator, mut brain, transform) in predator_query {
+        let pos = transform.translation.xy();
+        predator.walk_timer.tick(time.delta());
+        if predator.walk_timer.just_finished() {
+            commands.spawn(SenseEvent::new(
+                EventType::Auditory(AuditoryEventType::Walk),
                 pos,
-                hunger: 0.0,
-                movement: Vec2::ZERO,
-                attacking: false,
-                walk_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+                0.7,
+                5.0,
+            ));
+        }
+
+        let mut senses = Vec::new();
+        for event in events_query {
+            match event.event_type {
+                EventType::Auditory(_) => {
+                    senses.push(Sense::new(
+                        (event.position - pos).to_angle(),
+                        pos.distance(event.position),
+                        0.8,
+                        0.8,
+                        *event,
+                    ));
+                }
+                EventType::Visual(_) => {
+                    senses.push(Sense::new(
+                        (event.position - pos).to_angle(),
+                        pos.distance(event.position),
+                        0.95,
+                        0.9,
+                        *event,
+                    ));
+                }
+                _ => (),
+            }
+        }
+
+        predator.hunger += 0.1 * time.delta_secs();
+        predator.hunger = predator.hunger.min(1.0);
+        senses.push(Sense::internal(SenseEvent::internal(EventType::Internal(
+            InternalEventType::Hunger {
+                intensity: predator.hunger,
             },
-            Brain::new(vec![Box::new(AttackState::new())]),
-            Sprite::from_color(Color::srgb(1.0, 0.0, 0.0), Vec2::new(30.0, 30.0)),
-            Transform::from_xyz(pos.x - 15.0, pos.y - 15.0, 0.0),
-        ));
-    }
+        ))));
+        senses.push(Sense::internal(SenseEvent::internal(EventType::Internal(
+            InternalEventType::Movement {
+                amount: forces.linear_velocity() * time.delta_secs(),
+            },
+        ))));
 
-    pub fn attack(
-        mut commands: Commands,
-        predator_query: Query<&mut Self>,
-        prey_query: Query<(Entity, &Prey)>,
-    ) {
-        for mut predator in predator_query {
-            if !predator.attacking {
-                continue;
-            }
+        brain.apply(&mut *predator, senses, time.delta_secs());
 
-            for (prey_entity, prey) in prey_query {
-                if predator.pos.distance(prey.pos) < 20.0 {
-                    predator.hunger = 0.0;
-                    commands.entity(prey_entity).despawn(); // TODO: Spawn dead version which can be carried.
-                }
-            }
-        }
-    }
-
-    pub fn process(
-        mut commands: Commands,
-        time: Res<Time>,
-        events_query: Query<&SenseEvent>,
-        predator_query: Query<(
-            &mut Predator,
-            &mut Brain<SenseEvent, Action<PredatorAction>>,
-            &mut Transform,
-        )>,
-    ) {
-        // TODO: Unify a lot of this logic into a helper.
-        for (mut predator, mut brain, mut transform) in predator_query {
-            predator.walk_timer.tick(time.delta());
-            if predator.walk_timer.just_finished() {
-                commands.spawn(SenseEvent::new(
-                    EventType::Auditory(AuditoryEventType::Walk),
-                    predator.pos,
-                    0.7,
-                    5.0,
-                ));
-            }
-
-            let mut senses = Vec::new();
-            for event in events_query {
-                match event.event_type {
-                    EventType::Auditory(_) => {
-                        senses.push(Sense::new(
-                            (event.position - predator.pos).to_angle(),
-                            predator.pos.distance(event.position),
-                            0.8,
-                            0.8,
-                            *event,
-                        ));
-                    }
-                    EventType::Visual(_) => {
-                        senses.push(Sense::new(
-                            (event.position - predator.pos).to_angle(),
-                            predator.pos.distance(event.position),
-                            0.95,
-                            0.9,
-                            *event,
-                        ));
-                    }
-                    _ => (),
-                }
-            }
-
-            predator.hunger += 0.1 * time.delta_secs();
-            predator.hunger = predator.hunger.min(1.0);
-            senses.push(Sense::internal(SenseEvent::internal(EventType::Internal(
-                InternalEventType::Hunger {
-                    intensity: predator.hunger,
-                },
-            ))));
-            senses.push(Sense::internal(SenseEvent::internal(EventType::Internal(
-                InternalEventType::Movement {
-                    amount: predator.movement * time.delta_secs(),
-                },
-            ))));
-
-            brain.apply(&mut *predator, senses, time.delta_secs());
-
-            *transform = Transform::from_xyz(predator.pos.x - 15.0, predator.pos.y - 15.0, 0.0);
-        }
+        locomotor.desired_velocity = predator.desired_movement;
     }
 }
 
@@ -148,8 +164,9 @@ impl SmartEntity<Action<PredatorAction>> for Predator {
                 PredatorAction::Attack => self.attacking = true,
             }
         }
-        self.movement = self.movement.lerp(movement.normalize() * magnitude, 0.2);
-        self.pos += self.movement * delta;
+        self.desired_movement = self
+            .desired_movement
+            .lerp(movement.normalize() * magnitude, 0.2);
     }
 }
 

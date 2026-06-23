@@ -45,17 +45,13 @@ impl SenseEvent {
     pub fn internal(typ: EventType) -> Self {
         Self::new(typ, Vec2::new(0.0, 0.0), 0.0, 0.0)
     }
+}
 
-    pub fn process(
-        time: Res<Time>,
-        query: Query<(Entity, &mut SenseEvent)>,
-        mut commands: Commands,
-    ) {
-        for (entity, mut event) in query {
-            event.intensity -= event.decay_speed * time.delta_secs();
-            if event.intensity <= 0.0 {
-                commands.entity(entity).despawn();
-            }
+pub fn process(time: Res<Time>, query: Query<(Entity, &mut SenseEvent)>, mut commands: Commands) {
+    for (entity, mut event) in query {
+        event.intensity -= event.decay_speed * time.delta_secs();
+        if event.intensity <= 0.0 {
+            commands.entity(entity).despawn();
         }
     }
 }

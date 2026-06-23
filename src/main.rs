@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use avian2d::prelude::*;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
@@ -9,15 +7,15 @@ use bevy::{
     render::render_resource::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
-    time::common_conditions::on_timer,
     window::WindowResized,
 };
 use bevy_ecs_tilemap::prelude::*;
+// use bevy_embedded_assets::EmbeddedAssetPlugin;
 
 use crate::{
     body::{
         BodyHead, BodyLegs, ConnectedBodies, Elbow, Facing, Leg, Legged, Locomotor,
-        PreviousVelocity,
+        LocomotorOrchestrator, PreviousVelocity,
     },
     creature::Prey,
     environment::{AuditoryEventType, EventType, SenseEvent},
@@ -126,11 +124,6 @@ fn resize_render_target(
     }
 }
 
-fn create_predators(mut commands: Commands) {
-    Predator::setup(&mut commands, Vec2::new(-100.0, 200.0));
-    Predator::setup(&mut commands, Vec2::new(200.0, 100.0));
-}
-
 fn create_creatures(mut commands: Commands) {
     Prey::setup(&mut commands, Vec2::new(0.0, 0.0));
     Prey::setup(&mut commands, Vec2::new(100.0, 0.0));
@@ -170,10 +163,10 @@ fn create_foods(mut commands: Commands) {
     );
 }
 
-fn _spawn_event(
+fn spawn_event(
     mut commands: Commands,
     window_query: Query<&Window>,
-    camera_query: Query<(&Camera, &mut GlobalTransform), With<Camera2d>>,
+    camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
 ) {
     let Ok(window) = window_query.single() else {
         return;
@@ -181,18 +174,128 @@ fn _spawn_event(
     let Ok((camera, camera_transform)) = camera_query.single() else {
         return;
     };
-    let Some(cursor) = window
-        .cursor_position()
-        .and_then(|cursor| camera.viewport_to_world_2d(camera_transform, cursor).ok())
-    else {
+    let Some(cursor) = window.cursor_position().and_then(|cursor| {
+        camera
+            .viewport_to_world_2d(camera_transform, cursor / PIXEL_SCALE)
+            .ok()
+    }) else {
         return;
     };
     commands.spawn(SenseEvent::new(
-        EventType::Auditory(AuditoryEventType::Walk),
+        EventType::Auditory(AuditoryEventType::Scuttle),
         cursor,
         1.0,
         5.0,
     ));
+}
+
+fn spawn_enemy(
+    mut commands: Commands,
+    window_query: Query<&Window>,
+    camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
+) {
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position().and_then(|cursor| {
+        camera
+            .viewport_to_world_2d(camera_transform, cursor / PIXEL_SCALE)
+            .ok()
+    }) else {
+        return;
+    };
+
+    let legs = commands
+        .spawn((
+            PreviousVelocity(Vec2::ZERO),
+            Legged {
+                facing: Facing::Left,
+                legs: vec![
+                    Leg::new(
+                        vec![Vec2::new(0.4, -1.0), Vec2::new(0.5, -0.5)],
+                        Vec2::new(0.3, -1.0),
+                        25.0,
+                        160.0,
+                        16.0,
+                        22.0,
+                        Elbow::Down,
+                    ),
+                    Leg::new(
+                        vec![Vec2::new(-0.2, -1.0), Vec2::new(0.5, -0.5)],
+                        Vec2::new(-0.3, -1.0),
+                        25.0,
+                        160.0,
+                        16.0,
+                        22.0,
+                        Elbow::Down,
+                    ),
+                ],
+            },
+            Locomotor {
+                desired_velocity: Vec2::new(0.0, 0.0),
+            },
+            RigidBody::Dynamic,
+            Restitution::new(0.1),
+            Mass(1.0),
+            Collider::circle(10.0),
+            Transform::from_xyz(cursor.x, cursor.y, 0.0),
+        ))
+        .id();
+
+    let arms = commands
+        .spawn((
+            Predator::new(),
+            Predator::brain(),
+            Legged {
+                facing: Facing::Left,
+                legs: vec![
+                    Leg::new(
+                        vec![
+                            Vec2::new(-0.8, 0.5),
+                            Vec2::new(0.0, 1.0),
+                            Vec2::new(0.5, 0.5),
+                        ],
+                        Vec2::new(-0.7, -1.0),
+                        30.0,
+                        80.0,
+                        8.0,
+                        22.0,
+                        Elbow::Up,
+                    ),
+                    Leg::new(
+                        vec![
+                            Vec2::new(-0.5, 0.5),
+                            Vec2::new(0.0, 1.0),
+                            Vec2::new(0.8, 0.5),
+                        ],
+                        Vec2::new(0.7, -1.0),
+                        30.0,
+                        80.0,
+                        8.0,
+                        22.0,
+                        Elbow::Up,
+                    ),
+                ],
+            },
+            Locomotor {
+                desired_velocity: Vec2::new(0.0, 0.0),
+            },
+            LocomotorOrchestrator(vec![legs]),
+            RigidBody::Dynamic,
+            Restitution::new(0.1),
+            Mass(0.5),
+            Collider::circle(10.0),
+            Transform::from_xyz(cursor.x, cursor.y, 0.0),
+            ConnectedBodies(vec![legs]),
+        ))
+        .id();
+
+    commands.entity(legs).insert(ConnectedBodies(vec![arms]));
+
+    commands.spawn(DistanceJoint::new(legs, arms).with_limits(0.0, 20.0));
 }
 
 fn spawn_rigidbody(
@@ -328,6 +431,9 @@ fn camera_movement(
 
 fn main() {
     let mut app = App::new();
+    // app.add_plugins(EmbeddedAssetPlugin {
+    //     mode: bevy_embedded_assets::PluginMode::ReplaceDefault,
+    // });
     app.add_plugins((
         DefaultPlugins.set(ImagePlugin::default_nearest()),
         TilemapPlugin,
@@ -357,6 +463,8 @@ fn main() {
         (
             resize_render_target,
             spawn_rigidbody.run_if(input_just_pressed(MouseButton::Middle)),
+            spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
+            spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
             // update_rigidbodies,
             // camera_movement,
             tilemap::depth,
@@ -366,12 +474,12 @@ fn main() {
             // Predator::process,
             // Predator::attack,
             // Food::process,
-            // SenseEvent::process,
         ),
     );
     app.add_systems(
         FixedPostUpdate,
         (
+            environment::process,
             tilemap::bitmap
                 .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
             tilemap::edit,
@@ -381,6 +489,9 @@ fn main() {
             body::jump,
             body::animate,
             body::balance,
+            body::orchestrate,
+            predator::process,
+            predator::attack,
         ),
     );
     app.run();

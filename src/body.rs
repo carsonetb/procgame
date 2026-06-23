@@ -19,6 +19,9 @@ pub struct BodyLegs;
 #[derive(Component, Debug, Clone, Copy)]
 pub struct PreviousVelocity(pub Vec2);
 
+#[derive(Component, Debug, Clone, Copy)]
+pub struct UserControlled;
+
 impl Elbow {
     fn with_facing(&self, facing: Facing) -> Self {
         match self {
@@ -103,9 +106,18 @@ pub struct Locomotor {
     pub desired_velocity: Vec2,
 }
 
+#[derive(Component, Debug, Clone)]
+pub struct LocomotorOrchestrator(pub Vec<Entity>);
+
+impl LocomotorOrchestrator {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+}
+
 pub fn keyboard_movement(
     input: Res<ButtonInput<KeyCode>>,
-    query: Query<(&mut Legged, &mut Locomotor)>,
+    query: Query<(&mut Locomotor), With<UserControlled>>,
 ) {
     let mut movement = Vec2::ZERO;
     if input.pressed(KeyCode::KeyA) {
@@ -121,13 +133,8 @@ pub fn keyboard_movement(
         movement.y = 0.0;
         movement += Vec2::new(0.0, 100.0);
     }
-    for (mut legged, mut locomotor) in query {
+    for (mut locomotor) in query {
         locomotor.desired_velocity = movement;
-        legged.facing = if movement.x < 0.0 {
-            Facing::Left
-        } else {
-            Facing::Right
-        };
     }
 }
 
@@ -209,6 +216,12 @@ pub fn balance(
 
 pub fn locomote(mut query: Query<(Forces, &Locomotor, &mut Legged), With<RigidBody>>) {
     for (mut forces, locomotor, mut legged) in query.iter_mut() {
+        legged.facing = if locomotor.desired_velocity.x < 0.0 {
+            Facing::Left
+        } else {
+            Facing::Right
+        };
+
         for leg in &mut legged.legs {
             if leg.stepping {
                 continue;
@@ -302,10 +315,17 @@ pub fn animate(query: Query<(Forces, &mut Legged, &Transform), With<RigidBody>>)
     }
 }
 
-pub fn render(mut gizmos: Gizmos, query: Query<(&mut Legged, &Transform), With<RigidBody>>) {
-    for (mut legged, transform) in query {
+pub fn render(
+    mut gizmos: Gizmos,
+    query: Query<(&mut Legged, &Transform, &Collider), With<RigidBody>>,
+) {
+    for (mut legged, transform, collider) in query {
         let origin = transform.translation.xy();
-        gizmos.circle_2d(origin, 10.0, Color::srgb(1.0, 0.0, 1.0));
+        gizmos.circle_2d(
+            origin,
+            collider.shape().as_ball().unwrap().radius,
+            Color::srgb(1.0, 0.0, 1.0),
+        );
         let facing = legged.facing;
         for leg in &mut legged.legs {
             let end = leg.position;
@@ -330,6 +350,18 @@ pub fn render(mut gizmos: Gizmos, query: Query<(&mut Legged, &Transform), With<R
             let middle = origin + Vec2::new(l1 * shoulder_angle.cos(), l2 * shoulder_angle.sin());
             gizmos.line_2d(origin, middle, Color::srgb(1.0, 0.0, 1.0));
             gizmos.line_2d(middle, end, Color::srgb(1.0, 0.0, 1.0));
+        }
+    }
+}
+
+pub fn orchestrate(
+    orchestrators: Query<(&Locomotor, &LocomotorOrchestrator)>,
+    mut locomotors: Query<&mut Locomotor, Without<LocomotorOrchestrator>>,
+) {
+    for (master, orch) in orchestrators {
+        for entity in &orch.0 {
+            let mut locomotor = locomotors.get_mut(*entity).unwrap();
+            locomotor.desired_velocity = master.desired_velocity;
         }
     }
 }
