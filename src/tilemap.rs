@@ -18,6 +18,9 @@ const TO_BITMAP: phf::Map<(i32, i32), u8> = phf_map! {
     // (1, -1) =>  0b00000001,
 };
 
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct PhysicsTilemap(pub Entity);
+
 #[derive(Component, Debug, Clone, Copy)]
 pub enum MapType {
     Command,
@@ -25,11 +28,26 @@ pub enum MapType {
 }
 
 #[derive(Component, Debug, Clone, Copy)]
-pub struct MapDepth(i32);
+pub struct MapDepth(pub i32);
 
 #[derive(Component, Clone)]
 pub struct BitMap {
     map: HashMap<u8, TileTextureIndex>,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct CurrentTile {
+    tilemap: Entity,
+    pub tile: Option<TilePos>,
+}
+
+impl CurrentTile {
+    pub fn new(tilemap: Entity) -> Self {
+        Self {
+            tilemap,
+            tile: None,
+        }
+    }
 }
 
 fn spawn_tile(
@@ -140,7 +158,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let background_handle: Handle<Image> = asset_server.load("tilemap_background1.png");
     let background_handl2: Handle<Image> = asset_server.load("tilemap_background2.png");
     let size = TilemapSize { x: 80, y: 50 };
-    let command = create_tilemap(
+    let tilemap = create_tilemap(
         &mut commands,
         size,
         texture_handle.clone(),
@@ -148,11 +166,12 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         0.0,
         1,
     );
+    commands.insert_resource(PhysicsTilemap(tilemap));
     create_tilemap(
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(command),
+        MapType::Companion(tilemap),
         -1.0,
         -1,
     );
@@ -160,7 +179,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(command),
+        MapType::Companion(tilemap),
         -2.0,
         -2,
     );
@@ -168,7 +187,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(command),
+        MapType::Companion(tilemap),
         -3.0,
         -3,
     );
@@ -176,7 +195,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(command),
+        MapType::Companion(tilemap),
         -4.0,
         -4,
     );
@@ -184,7 +203,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(command),
+        MapType::Companion(tilemap),
         -5.0,
         -5,
     );
@@ -192,7 +211,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handl2.clone(),
-        MapType::Companion(command),
+        MapType::Companion(tilemap),
         -1.0,
         -5,
     );
@@ -352,5 +371,32 @@ pub fn edit(
                 storage.set(&position, tile_entity);
             }
         }
+    }
+}
+
+pub fn update_current_tile(
+    query: Query<(&mut CurrentTile, &Transform)>,
+    tilemap_query: Query<(
+        &TilemapSize,
+        &TilemapGridSize,
+        &TilemapTileSize,
+        &TilemapType,
+        &TilemapAnchor,
+    )>,
+) {
+    for (mut current_tile, transform) in query {
+        let (map_size, grid_size, tile_size, map_type, anchor) =
+            tilemap_query.get(current_tile.tilemap).unwrap();
+        current_tile.tile = Some(
+            TilePos::from_world_pos(
+                &(transform.translation.xy() / 2.0),
+                map_size,
+                grid_size,
+                tile_size,
+                map_type,
+                anchor,
+            )
+            .unwrap(),
+        );
     }
 }

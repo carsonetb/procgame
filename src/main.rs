@@ -1,3 +1,5 @@
+use std::{collections::HashSet, time::Duration};
+
 use avian2d::prelude::*;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
@@ -7,6 +9,7 @@ use bevy::{
     render::render_resource::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
+    time::common_conditions::on_timer,
     window::WindowResized,
 };
 use bevy_ecs_tilemap::prelude::*;
@@ -20,7 +23,9 @@ use crate::{
     creature::Prey,
     environment::{AuditoryEventType, EventType, SenseEvent},
     food::Food,
+    pathfind::Pathfinding,
     predator::Predator,
+    tilemap::{CurrentTile, MapDepth},
 };
 
 mod body;
@@ -29,6 +34,7 @@ mod creature;
 mod editor;
 mod environment;
 mod food;
+mod pathfind;
 mod predator;
 mod prerender;
 mod tilemap;
@@ -167,6 +173,14 @@ fn spawn_event(
     mut commands: Commands,
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
+    tilemap_query: Query<(
+        &TilemapSize,
+        &TilemapGridSize,
+        &TilemapTileSize,
+        &TilemapType,
+        &TilemapAnchor,
+        &MapDepth,
+    )>,
 ) {
     let Ok(window) = window_query.single() else {
         return;
@@ -181,8 +195,28 @@ fn spawn_event(
     }) else {
         return;
     };
+
+    let (map_size, grid_size, tile_size, map_type, anchor, depth) = tilemap_query
+        .iter()
+        .find(|(_, _, _, _, _, depth)| depth.0 == 1)
+        .unwrap();
+    let map_pos = TilePos::from_world_pos(
+        &(cursor / 2.0),
+        map_size,
+        grid_size,
+        tile_size,
+        map_type,
+        anchor,
+    )
+    .unwrap();
+    let mut tiles = HashSet::new();
+    tiles.insert(map_pos);
+
     commands.spawn(SenseEvent::new(
-        EventType::Auditory(AuditoryEventType::Scuttle),
+        EventType::Auditory {
+            typ: AuditoryEventType::Scuttle,
+            affects: tiles,
+        },
         cursor,
         1.0,
         5.0,
@@ -193,6 +227,7 @@ fn spawn_enemy(
     mut commands: Commands,
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
+    tilemap_query: Query<(Entity, &MapDepth)>,
 ) {
     let Ok(window) = window_query.single() else {
         return;
@@ -208,6 +243,11 @@ fn spawn_enemy(
         return;
     };
 
+    let (tilemap, _) = tilemap_query
+        .iter()
+        .find(|(_, depth)| depth.0 == 1)
+        .unwrap();
+
     let legs = commands
         .spawn((
             PreviousVelocity(Vec2::ZERO),
@@ -217,19 +257,19 @@ fn spawn_enemy(
                     Leg::new(
                         vec![Vec2::new(0.4, -1.0), Vec2::new(0.5, -0.5)],
                         Vec2::new(0.3, -1.0),
-                        25.0,
+                        35.0,
                         160.0,
                         16.0,
-                        22.0,
+                        30.0,
                         Elbow::Down,
                     ),
                     Leg::new(
                         vec![Vec2::new(-0.2, -1.0), Vec2::new(0.5, -0.5)],
                         Vec2::new(-0.3, -1.0),
-                        25.0,
+                        35.0,
                         160.0,
                         16.0,
-                        22.0,
+                        30.0,
                         Elbow::Down,
                     ),
                 ],
@@ -247,8 +287,10 @@ fn spawn_enemy(
 
     let arms = commands
         .spawn((
+            CurrentTile::new(tilemap),
             Predator::new(),
             Predator::brain(),
+            Pathfinding::new(tilemap, cursor, cursor, 4),
             Legged {
                 facing: Facing::Left,
                 legs: vec![
@@ -259,10 +301,10 @@ fn spawn_enemy(
                             Vec2::new(0.5, 0.5),
                         ],
                         Vec2::new(-0.7, -1.0),
-                        30.0,
+                        40.0,
                         80.0,
                         8.0,
-                        22.0,
+                        33.0,
                         Elbow::Up,
                     ),
                     Leg::new(
@@ -272,10 +314,10 @@ fn spawn_enemy(
                             Vec2::new(0.8, 0.5),
                         ],
                         Vec2::new(0.7, -1.0),
-                        30.0,
+                        40.0,
                         80.0,
                         8.0,
-                        22.0,
+                        33.0,
                         Elbow::Up,
                     ),
                 ],
@@ -461,6 +503,7 @@ fn main() {
     app.add_systems(
         Update,
         (
+            environment::debug_sound,
             resize_render_target,
             spawn_rigidbody.run_if(input_just_pressed(MouseButton::Middle)),
             spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
@@ -480,9 +523,12 @@ fn main() {
         FixedPostUpdate,
         (
             environment::process,
+            environment::sound,
             tilemap::bitmap
                 .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
             tilemap::edit,
+            tilemap::update_current_tile,
+            pathfind::pathfind,
             body::keyboard_movement,
             body::stand,
             body::locomote,
@@ -492,6 +538,7 @@ fn main() {
             body::orchestrate,
             predator::process,
             predator::attack,
+            predator::translate,
         ),
     );
     app.run();

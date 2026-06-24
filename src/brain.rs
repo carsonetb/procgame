@@ -9,8 +9,8 @@ pub struct Action<C> {
     pub weight: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Sense<S: Copy> {
+#[derive(Debug, Clone)]
+pub struct Sense<S: Clone> {
     pub direction: f32,
     pub distance: f32,
     pub direction_precision: f32,
@@ -18,7 +18,7 @@ pub struct Sense<S: Copy> {
     pub sense_type: S,
 }
 
-impl<S: Copy> Sense<S> {
+impl<S: Clone> Sense<S> {
     pub fn new(
         direction: f32,
         distance: f32,
@@ -50,7 +50,7 @@ impl<S: Copy> Sense<S> {
     }
 }
 
-pub trait Belief<S: Copy, C>: Send + Sync {
+pub trait Belief<S: Clone, C>: Send + Sync {
     fn decay(&mut self, delta: f32);
     fn update(&mut self, sense: Sense<S>);
     fn minimize(&mut self) -> Vec<C>;
@@ -65,7 +65,7 @@ pub struct Brain<S, C> {
     pub states: Vec<Box<dyn Belief<S, C>>>,
 }
 
-impl<S: Copy, C> Brain<S, C> {
+impl<S: Clone, C> Brain<S, C> {
     pub fn new(states: Vec<Box<dyn Belief<S, C>>>) -> Self {
         Self { states }
     }
@@ -75,7 +75,7 @@ impl<S: Copy, C> Brain<S, C> {
         for state in &mut self.states {
             state.decay(delta);
             for sense in &senses {
-                state.update(*sense);
+                state.update(sense.clone());
             }
             commands.append(&mut state.minimize());
         }

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use bevy::prelude::*;
 
@@ -6,6 +6,7 @@ use crate::{
     brain::{Action, Belief, Brain, Sense, SmartEntity},
     environment::{AuditoryEventType, EventType, InternalEventType, SenseEvent, VisualEventType},
     food::Food,
+    tilemap::{CurrentTile, PhysicsTilemap},
 };
 
 #[derive(Component)]
@@ -66,13 +67,24 @@ impl Prey {
             &mut Prey,
             &mut Brain<SenseEvent, Action<CreatureAction>>,
             &mut Transform,
+            &CurrentTile,
         )>,
     ) {
-        for (mut creature, mut brain, mut transform) in creature_query {
+        for (mut creature, mut brain, mut transform, current) in creature_query {
             creature.walk_timer.tick(time.delta());
+
+            let Some(current) = current.tile else {
+                continue;
+            };
+            let mut tiles = HashSet::new();
+            tiles.insert(current);
+
             if creature.walk_timer.just_finished() {
                 commands.spawn(SenseEvent::new(
-                    EventType::Auditory(AuditoryEventType::Scuttle),
+                    EventType::Auditory {
+                        typ: AuditoryEventType::Scuttle,
+                        affects: tiles,
+                    },
                     creature.pos,
                     0.6,
                     5.0,
@@ -82,13 +94,13 @@ impl Prey {
             let mut senses = Vec::new();
             for event in events_query {
                 match event.event_type {
-                    EventType::Auditory(_) => {
+                    EventType::Auditory { .. } => {
                         senses.push(Sense::new(
                             (event.position - creature.pos).to_angle(),
                             creature.pos.distance(event.position),
                             0.6,
                             0.6,
-                            *event,
+                            event.clone(),
                         ));
                     }
                     EventType::Visual(_) => {
@@ -97,7 +109,7 @@ impl Prey {
                             creature.pos.distance(event.position),
                             0.95,
                             0.8,
-                            *event,
+                            event.clone(),
                         ));
                     }
                     _ => (),
@@ -195,7 +207,10 @@ impl Belief<SenseEvent, Action<CreatureAction>> for RunState {
 
     fn update(&mut self, sense: Sense<SenseEvent>) {
         match sense.sense_type.event_type {
-            EventType::Auditory(AuditoryEventType::Walk) => {
+            EventType::Auditory {
+                typ: AuditoryEventType::Walk,
+                ..
+            } => {
                 let (distance, _, vector) = sense.get_pos(&mut self.rng);
                 if distance > Self::MAX_DISTANCE {
                     return;

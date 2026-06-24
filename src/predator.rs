@@ -1,7 +1,18 @@
+use std::{collections::HashSet, time::Duration};
+
 use avian2d::prelude::*;
 use bevy::prelude::*;
+use bevy_ecs_tilemap::prelude::*;
+use rand::RngExt;
 
-use crate::{body::*, brain::*, creature::Prey, environment::*};
+use crate::{
+    body::*,
+    brain::*,
+    creature::Prey,
+    environment::*,
+    pathfind::Pathfinding,
+    tilemap::{CurrentTile, PhysicsTilemap},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum PredatorAction {
@@ -28,23 +39,12 @@ impl Predator {
     }
 
     pub fn brain() -> Brain<SenseEvent, Action<PredatorAction>> {
-        Brain::new(vec![Box::new(AttackState::new())])
+        Brain::new(vec![
+            Box::new(AttackState::new()),
+            Box::new(NoRepeatState::new()),
+        ])
     }
 }
-
-// pub fn setup(commands: &mut Commands, pos: Vec2) {
-//     commands.spawn((
-//         Self {
-//             desired_movement: Vec2::ZERO,
-//             hunger: 0.0,
-//             attacking: false,
-//             walk_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
-//         },
-//         Brain::new(vec![Box::new(AttackState::new())]),
-//         Sprite::from_color(Color::srgb(1.0, 0.0, 0.0), Vec2::new(30.0, 30.0)),
-//         Transform::from_xyz(pos.x, pos.y, 0.0),
-//     ));
-// }
 
 pub fn attack(
     mut commands: Commands,
@@ -72,19 +72,37 @@ pub fn process(
     events_query: Query<&SenseEvent>,
     predator_query: Query<(
         Forces,
-        &mut Locomotor,
         &mut Predator,
         &mut Brain<SenseEvent, Action<PredatorAction>>,
         &Transform,
+        &CurrentTile,
+    )>,
+    physics_tilemap: Res<PhysicsTilemap>,
+    q_tilemap: Query<(
+        &TilemapSize,
+        &TilemapGridSize,
+        &TilemapTileSize,
+        &TilemapType,
+        &TilemapAnchor,
     )>,
 ) {
     // TODO: Unify a lot of this logic into a helper.
-    for (forces, mut locomotor, mut predator, mut brain, transform) in predator_query {
+    for (forces, mut predator, mut brain, transform, current) in predator_query {
         let pos = transform.translation.xy();
         predator.walk_timer.tick(time.delta());
+
+        let Some(current) = current.tile else {
+            continue;
+        };
+        let mut tiles = HashSet::new();
+        tiles.insert(current);
+
         if predator.walk_timer.just_finished() {
             commands.spawn(SenseEvent::new(
-                EventType::Auditory(AuditoryEventType::Walk),
+                EventType::Auditory {
+                    typ: AuditoryEventType::Walk,
+                    affects: tiles,
+                },
                 pos,
                 0.7,
                 5.0,
@@ -94,13 +112,13 @@ pub fn process(
         let mut senses = Vec::new();
         for event in events_query {
             match event.event_type {
-                EventType::Auditory(_) => {
+                EventType::Auditory { .. } => {
                     senses.push(Sense::new(
                         (event.position - pos).to_angle(),
                         pos.distance(event.position),
                         0.8,
                         0.8,
-                        *event,
+                        event.clone(),
                     ));
                 }
                 EventType::Visual(_) => {
@@ -109,12 +127,15 @@ pub fn process(
                         pos.distance(event.position),
                         0.95,
                         0.9,
-                        *event,
+                        event.clone(),
                     ));
                 }
                 _ => (),
             }
         }
+
+        let (map_size, grid_size, tile_size, map_type, anchor) =
+            q_tilemap.get(physics_tilemap.0).unwrap();
 
         predator.hunger += 0.1 * time.delta_secs();
         predator.hunger = predator.hunger.min(1.0);
@@ -128,15 +149,76 @@ pub fn process(
                 amount: forces.linear_velocity() * time.delta_secs(),
             },
         ))));
+        senses.push(Sense::internal(SenseEvent::internal(EventType::Internal(
+            InternalEventType::Position(pos),
+        ))));
+        senses.push(Sense::internal(SenseEvent::internal(EventType::Internal(
+            InternalEventType::Tile(
+                current,
+                current.center_in_world(map_size, grid_size, tile_size, map_type, anchor) * 2.0,
+            ),
+        ))));
 
         brain.apply(&mut *predator, senses, time.delta_secs());
+    }
+}
 
-        locomotor.desired_velocity = predator.desired_movement;
+pub fn translate(
+    mut gizmos: Gizmos,
+    spatial_query: SpatialQuery,
+    query: Query<(
+        Entity,
+        &mut Locomotor,
+        &mut Pathfinding,
+        &Predator,
+        &Transform,
+        Option<&ConnectedBodies>,
+    )>,
+) {
+    for (entity, mut locomotor, mut pathfinding, predator, transform, connected) in query {
+        const DIRECTIONS: [Dir2; 4] = [Dir2::NEG_X, Dir2::X, Dir2::NEG_Y, Dir2::Y];
+
+        let pos = transform.translation.xy();
+        let movement = predator.desired_movement;
+
+        pathfinding.from = pos;
+        pathfinding.to = pos + movement;
+        let Some(direction) = pathfinding.direction else {
+            continue;
+        };
+        let mut movement = direction * movement.length();
+
+        let mut excluded = vec![entity];
+        if let Some(connected) = connected {
+            for connected in &connected.0 {
+                excluded.push(*connected);
+            }
+        }
+
+        for direction in DIRECTIONS {
+            if let Some(_data) = spatial_query.cast_ray(
+                pos,
+                direction,
+                20.0,
+                true,
+                &SpatialQueryFilter::from_excluded_entities(excluded.clone()),
+            ) {
+                if direction.x.abs() > 0.5 && movement.y > 100.0 {
+                    movement.x = direction.x * 50.0;
+                }
+                if direction.y.abs() > 0.5 && direction.y.signum() == movement.y.signum() {
+                    movement.y = 0.0;
+                }
+                gizmos.line_2d(pos, pos + direction.as_vec2() * 20.0, Color::BLACK);
+            }
+        }
+
+        locomotor.desired_velocity = movement;
     }
 }
 
 impl SmartEntity<Action<PredatorAction>> for Predator {
-    fn apply(&mut self, commands: Vec<Action<PredatorAction>>, delta: f32) {
+    fn apply(&mut self, commands: Vec<Action<PredatorAction>>, _delta: f32) {
         let max = commands
             .iter()
             .max_by(|left, right| left.weight.abs().total_cmp(&right.weight.abs()))
@@ -167,6 +249,77 @@ impl SmartEntity<Action<PredatorAction>> for Predator {
         self.desired_movement = self
             .desired_movement
             .lerp(movement.normalize() * magnitude, 0.2);
+    }
+}
+
+struct NoRepeatState {
+    pos: Vec2,
+    recent: Vec<(TilePos, Vec2)>,
+    decay_timer: Timer,
+}
+
+impl NoRepeatState {
+    const TILE_MEMORY: usize = 4;
+
+    pub fn new() -> Self {
+        Self {
+            pos: Vec2::ZERO,
+            recent: Vec::new(),
+            decay_timer: Timer::from_seconds(1.0, TimerMode::Repeating),
+        }
+    }
+}
+
+impl Belief<SenseEvent, Action<PredatorAction>> for NoRepeatState {
+    fn decay(&mut self, delta: f32) {
+        self.decay_timer.tick(Duration::from_secs_f32(delta));
+        if self.decay_timer.just_finished() {
+            self.recent.remove(0);
+        }
+    }
+
+    fn update(&mut self, sense: Sense<SenseEvent>) {
+        if let EventType::Internal(InternalEventType::Position(pos)) = sense.sense_type.event_type {
+            self.pos = pos;
+        }
+
+        let EventType::Internal(InternalEventType::Tile(tile, pos)) = sense.sense_type.event_type
+        else {
+            return;
+        };
+
+        match self.recent.last() {
+            Some((last, _)) => {
+                if *last != tile {
+                    self.decay_timer.finish();
+                    if self.recent.len() == Self::TILE_MEMORY {
+                        self.recent.remove(0);
+                    }
+                    self.recent.push((tile, pos));
+                }
+            }
+            None => {
+                self.decay_timer.finish();
+                self.recent.push((tile, pos))
+            }
+        }
+    }
+
+    fn minimize(&mut self) -> Vec<Action<PredatorAction>> {
+        dbg!(&self.recent);
+        let mut sum = Vec2::ZERO;
+        for recent in &self.recent {
+            sum += recent.1;
+        }
+        let avg: Vec2 = sum / self.recent.len() as f32 - self.pos;
+        if sum == Vec2::ZERO {
+            vec![]
+        } else {
+            vec![Action {
+                command: PredatorAction::Movement(-avg.normalize() * 100.0 + Vec2::new(0.0, 50.0)), // Always want a little climbing action
+                weight: 20.0,
+            }]
+        }
     }
 }
 
@@ -203,7 +356,10 @@ impl Belief<SenseEvent, Action<PredatorAction>> for AttackState {
 
     fn update(&mut self, sense: Sense<SenseEvent>) {
         match sense.sense_type.event_type {
-            EventType::Auditory(AuditoryEventType::Scuttle) => {
+            EventType::Auditory {
+                typ: AuditoryEventType::Scuttle,
+                ..
+            } => {
                 let (distance, _, vector) = sense.get_pos(&mut self.rng);
                 if distance > Self::MAX_DISTANCE {
                     return;
