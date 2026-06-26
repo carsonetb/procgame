@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
@@ -17,6 +17,9 @@ const TO_BITMAP: phf::Map<(i32, i32), u8> = phf_map! {
     (0, -1) =>   0b0001,
     // (1, -1) =>  0b00000001,
 };
+
+#[derive(Resource, Debug, Clone)]
+pub struct TilemapGroups(pub Vec<Entity>);
 
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct PhysicsTilemap(pub Entity);
@@ -57,6 +60,7 @@ fn spawn_tile(
     map_size: TilemapSize,
     tile_size: TilemapTileSize,
     tile_pos: TilePos,
+    physics: bool,
 ) -> Entity {
     let world = tile_pos.center_in_world(
         &map_size,
@@ -65,8 +69,8 @@ fn spawn_tile(
         &TilemapType::Square,
         &TilemapAnchor::Center,
     ) * 2.0;
-    match typ {
-        MapType::Command => commands
+    match (typ, physics) {
+        (MapType::Command, true) => commands
             .spawn((
                 TileBundle {
                     position: tile_pos,
@@ -78,7 +82,7 @@ fn spawn_tile(
                 Transform::from_xyz(world.x, world.y, 0.0),
             ))
             .id(),
-        MapType::Companion(_) => commands
+        _ => commands
             .spawn(TileBundle {
                 position: tile_pos,
                 tilemap_id: TilemapId(tilemap),
@@ -95,6 +99,7 @@ fn create_tilemap(
     typ: MapType,
     z: f32,
     depth: i32,
+    physics: bool,
 ) -> Entity {
     let tilemap_entity = commands.spawn_empty().id();
 
@@ -104,8 +109,15 @@ fn create_tilemap(
     for x in 0..map_size.x {
         for y in 0..map_size.y {
             let tile_pos = TilePos { x, y };
-            let tile_entity =
-                spawn_tile(commands, tilemap_entity, typ, map_size, tile_size, tile_pos);
+            let tile_entity = spawn_tile(
+                commands,
+                tilemap_entity,
+                typ,
+                map_size,
+                tile_size,
+                tile_pos,
+                physics,
+            );
             tile_storage.set(&tile_pos, tile_entity);
         }
     }
@@ -158,63 +170,102 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let background_handle: Handle<Image> = asset_server.load("tilemap_background1.png");
     let background_handl2: Handle<Image> = asset_server.load("tilemap_background2.png");
     let size = TilemapSize { x: 80, y: 50 };
-    let tilemap = create_tilemap(
+    let front = create_tilemap(
         &mut commands,
         size,
         texture_handle.clone(),
         MapType::Command,
         0.0,
         1,
+        true,
     );
-    commands.insert_resource(PhysicsTilemap(tilemap));
+    commands.insert_resource(PhysicsTilemap(front));
+
     create_tilemap(
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(tilemap),
+        MapType::Companion(front),
         -1.0,
         -1,
+        false,
     );
     create_tilemap(
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(tilemap),
+        MapType::Companion(front),
         -2.0,
         -2,
+        false,
     );
     create_tilemap(
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(tilemap),
+        MapType::Companion(front),
         -3.0,
         -3,
+        false,
     );
     create_tilemap(
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(tilemap),
+        MapType::Companion(front),
         -4.0,
         -4,
+        false,
     );
     create_tilemap(
         &mut commands,
         size,
         background_handle.clone(),
-        MapType::Companion(tilemap),
+        MapType::Companion(front),
         -5.0,
         -5,
+        false,
     );
     create_tilemap(
         &mut commands,
         size,
         background_handl2.clone(),
-        MapType::Companion(tilemap),
+        MapType::Companion(front),
         -1.0,
         -5,
+        false,
     );
+
+    let middle = create_tilemap(
+        &mut commands,
+        size,
+        texture_handle.clone(),
+        MapType::Command,
+        -10.0,
+        -10,
+        false,
+    );
+
+    create_tilemap(
+        &mut commands,
+        size,
+        background_handle.clone(),
+        MapType::Companion(middle),
+        -11.0,
+        -11,
+        false,
+    );
+    create_tilemap(
+        &mut commands,
+        size,
+        background_handle.clone(),
+        MapType::Companion(middle),
+        -12.0,
+        -12,
+        false,
+    );
+
+    commands.insert_resource(TilemapGroups(vec![front, middle]));
 }
 
 pub fn bitmap(
@@ -293,9 +344,27 @@ pub fn depth(
     }
 }
 
+pub fn colordepth(mut q_tiles: Query<&mut TileColor>, q_tilemap: Query<(&TileStorage, &MapDepth)>) {
+    for (storage, depth) in q_tilemap {
+        let depth = depth.0 as f32;
+
+        for entity in storage.iter() {
+            let Some(entity) = entity else {
+                continue;
+            };
+
+            let mut color = q_tiles.get_mut(*entity).unwrap();
+            let amount = 1.0 - depth / 50.0;
+            *color = TileColor(Color::srgb(amount, amount * 0.2, amount * 0.2));
+        }
+    }
+}
+
 pub fn edit(
     mut commands: Commands,
     mouse_input: Res<ButtonInput<MouseButton>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    tilemap_groups: Res<TilemapGroups>,
     tilemap_query: Query<
         (
             Entity,
@@ -327,6 +396,17 @@ pub fn edit(
         return;
     };
 
+    let index = if keyboard_input.pressed(KeyCode::ControlLeft) {
+        1
+    } else if keyboard_input.pressed(KeyCode::ShiftLeft) {
+        2
+    } else {
+        0
+    };
+    let Some(group) = tilemap_groups.0.get(index) else {
+        return;
+    };
+
     for (
         tilemap_id,
         mut storage,
@@ -340,6 +420,10 @@ pub fn edit(
     ) in tilemap_query
     {
         if let MapType::Companion(_) = typ {
+            continue;
+        }
+
+        if group != &tilemap_id {
             continue;
         }
 
@@ -367,6 +451,7 @@ pub fn edit(
                     *map_size,
                     *tile_size,
                     position,
+                    if index == 0 { true } else { false },
                 );
                 storage.set(&position, tile_entity);
             }

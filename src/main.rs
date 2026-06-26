@@ -9,6 +9,7 @@ use bevy::{
     render::render_resource::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
+    time::common_conditions::on_timer,
     window::WindowResized,
 };
 use bevy_ecs_tilemap::prelude::*;
@@ -516,6 +517,7 @@ fn main() {
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
             // environment::debug_sound,
             tilemap::depth,
+            tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))),
             body::render,
             // Prey::process,
             // Prey::eat,
