@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::{helpers::square_grid::neighbors::Neighbors, prelude::*};
 use phf_macros::phf_map;
+use rand::{RngExt, seq::IndexedRandom};
 
 use crate::{MainCamera, PIXEL_SCALE};
 
@@ -35,7 +36,7 @@ pub struct MapDepth(pub i32);
 
 #[derive(Component, Clone)]
 pub struct BitMap {
-    map: HashMap<u8, TileTextureIndex>,
+    map: HashMap<u8, Vec<TileTextureIndex>>,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -125,18 +126,25 @@ fn create_tilemap(
     let map_type = TilemapType::default();
 
     let mut map = HashMap::new();
-    map.insert(0b0011, TileTextureIndex(6));
-    map.insert(0b0111, TileTextureIndex(7));
-    map.insert(0b0101, TileTextureIndex(8));
-    map.insert(0b1011, TileTextureIndex(11));
-    map.insert(0b1111, TileTextureIndex(12));
-    map.insert(0b1101, TileTextureIndex(13));
-    map.insert(0b1010, TileTextureIndex(16));
-    map.insert(0b1110, TileTextureIndex(17));
-    map.insert(0b1100, TileTextureIndex(18));
-    map.insert(0b0010, TileTextureIndex(21));
-    map.insert(0b0110, TileTextureIndex(22));
-    map.insert(0b0100, TileTextureIndex(24));
+    map.insert(0b0011, vec![TileTextureIndex(0), TileTextureIndex(6)]);
+    map.insert(0b0111, vec![TileTextureIndex(2), TileTextureIndex(7)]);
+    map.insert(0b0101, vec![TileTextureIndex(4), TileTextureIndex(8)]);
+    map.insert(
+        0b1011,
+        vec![
+            TileTextureIndex(10),
+            TileTextureIndex(11),
+            TileTextureIndex(15),
+        ],
+    );
+    map.insert(0b1111, vec![TileTextureIndex(12)]);
+    map.insert(0b1101, vec![TileTextureIndex(13)]);
+    map.insert(0b1010, vec![TileTextureIndex(16)]);
+    map.insert(0b1110, vec![TileTextureIndex(17)]);
+    map.insert(0b1100, vec![TileTextureIndex(18)]);
+    map.insert(0b0010, vec![TileTextureIndex(21)]);
+    map.insert(0b0110, vec![TileTextureIndex(22), TileTextureIndex(23)]);
+    map.insert(0b0100, vec![TileTextureIndex(24)]);
 
     let bundle = (
         TilemapBundle {
@@ -302,7 +310,15 @@ pub fn bitmap(
                         }
 
                         if let Ok(mut this_texture) = tile_query.get_mut(this_entity) {
-                            *this_texture = *bitmap.map.get(&id).unwrap_or(&TileTextureIndex(6));
+                            let default = vec![TileTextureIndex(6)];
+                            let tiles = bitmap.map.get(&id).unwrap_or(&default);
+                            *this_texture = *tiles
+                                .get(if tiles.len() > 1 {
+                                    rand::rng().random_range(0..tiles.len() - 1)
+                                } else {
+                                    0
+                                })
+                                .unwrap();
                         }
                     }
                     MapType::Companion(entity) => {
@@ -315,7 +331,7 @@ pub fn bitmap(
                                     *this_texture = other_texture;
                                 }
                             } else if let Ok(mut this_texture) = tile_query.get_mut(this_entity) {
-                                *this_texture = TileTextureIndex(0);
+                                *this_texture = TileTextureIndex(1);
                             }
                         }
                     }

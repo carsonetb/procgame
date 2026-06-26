@@ -491,6 +491,7 @@ fn main() {
         // PhysicsDebugPlugin,
     ));
     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
+    app.insert_resource(ClearColor(Color::srgb(0.5, 0.2, 0.2)));
     app.insert_gizmo_config(
         DefaultGizmoConfigGroup,
         GizmoConfig {
