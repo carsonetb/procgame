@@ -156,7 +156,7 @@ fn create_tilemap(
             tile_size,
             anchor: TilemapAnchor::Center,
             transform: Transform::from_scale(
-                Vec3::new(2.0, 2.0, 1.0) * (1.0 + (depth as f32) / 180.0),
+                Vec3::new(2.0, 2.0, 1.0) * (1.0 + (depth as f32) / 420.0),
             )
             .with_translation(Vec3::new(0.0, 0.0, z)),
             render_settings: TilemapRenderSettings {
@@ -203,26 +203,8 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         size,
         background_handle.clone(),
         MapType::Companion(front),
-        -2.0,
-        -2,
-        false,
-    );
-    create_tilemap(
-        &mut commands,
-        size,
-        background_handle.clone(),
-        MapType::Companion(front),
         -3.0,
         -3,
-        false,
-    );
-    create_tilemap(
-        &mut commands,
-        size,
-        background_handle.clone(),
-        MapType::Companion(front),
-        -4.0,
-        -4,
         false,
     );
     create_tilemap(
@@ -237,10 +219,28 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     create_tilemap(
         &mut commands,
         size,
+        background_handle.clone(),
+        MapType::Companion(front),
+        -7.0,
+        -7,
+        false,
+    );
+    create_tilemap(
+        &mut commands,
+        size,
+        background_handle.clone(),
+        MapType::Companion(front),
+        -9.0,
+        -9,
+        false,
+    );
+    create_tilemap(
+        &mut commands,
+        size,
         background_handl2.clone(),
         MapType::Companion(front),
         -1.0,
-        -5,
+        -9,
         false,
     );
 
@@ -259,8 +259,8 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         size,
         background_handle.clone(),
         MapType::Companion(middle),
-        -11.0,
-        -11,
+        -12.0,
+        -12,
         false,
     );
     create_tilemap(
@@ -268,8 +268,8 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         size,
         background_handle.clone(),
         MapType::Companion(middle),
-        -12.0,
-        -12,
+        -14.0,
+        -14,
         false,
     );
 
@@ -314,7 +314,7 @@ pub fn bitmap(
                             let tiles = bitmap.map.get(&id).unwrap_or(&default);
                             *this_texture = *tiles
                                 .get(if tiles.len() > 1 {
-                                    rand::rng().random_range(0..tiles.len() - 1)
+                                    rand::rng().random_range(0..tiles.len())
                                 } else {
                                     0
                                 })

@@ -517,7 +517,7 @@ fn main() {
             spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
             // environment::debug_sound,
-            tilemap::depth,
+            // tilemap::depth,
             tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))),
             body::render,
             // Prey::process,
