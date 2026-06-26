@@ -111,15 +111,17 @@ pub fn process(
 
         let mut senses = Vec::new();
         for event in events_query {
-            match event.event_type {
-                EventType::Auditory { .. } => {
-                    senses.push(Sense::new(
-                        (event.position - pos).to_angle(),
-                        pos.distance(event.position),
-                        0.8,
-                        0.8,
-                        event.clone(),
-                    ));
+            match &event.event_type {
+                EventType::Auditory { affects, .. } => {
+                    if affects.contains(&current) {
+                        senses.push(Sense::new(
+                            (event.position - pos).to_angle(),
+                            pos.distance(event.position),
+                            0.8,
+                            0.8,
+                            event.clone(),
+                        ));
+                    }
                 }
                 EventType::Visual(_) => {
                     senses.push(Sense::new(
@@ -306,7 +308,6 @@ impl Belief<SenseEvent, Action<PredatorAction>> for NoRepeatState {
     }
 
     fn minimize(&mut self) -> Vec<Action<PredatorAction>> {
-        dbg!(&self.recent);
         let mut sum = Vec2::ZERO;
         for recent in &self.recent {
             sum += recent.1;
@@ -317,7 +318,7 @@ impl Belief<SenseEvent, Action<PredatorAction>> for NoRepeatState {
         } else {
             vec![Action {
                 command: PredatorAction::Movement(-avg.normalize() * 100.0 + Vec2::new(0.0, 50.0)), // Always want a little climbing action
-                weight: 20.0,
+                weight: 10.0,
             }]
         }
     }

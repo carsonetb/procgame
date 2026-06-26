@@ -9,7 +9,6 @@ use bevy::{
     render::render_resource::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
-    time::common_conditions::on_timer,
     window::WindowResized,
 };
 use bevy_ecs_tilemap::prelude::*;
@@ -18,10 +17,9 @@ use bevy_ecs_tilemap::prelude::*;
 use crate::{
     body::{
         BodyHead, BodyLegs, ConnectedBodies, Elbow, Facing, Leg, Legged, Locomotor,
-        LocomotorOrchestrator, PreviousVelocity,
+        LocomotorOrchestrator, PreviousVelocity, UserControlled,
     },
-    creature::Prey,
-    environment::{AuditoryEventType, EventType, SenseEvent},
+    environment::{AuditoryEventType, Emitter, EventType, SenseEvent},
     food::Food,
     pathfind::Pathfinding,
     predator::Predator,
@@ -128,12 +126,6 @@ fn resize_render_target(
             });
         }
     }
-}
-
-fn create_creatures(mut commands: Commands) {
-    Prey::setup(&mut commands, Vec2::new(0.0, 0.0));
-    Prey::setup(&mut commands, Vec2::new(100.0, 0.0));
-    Prey::setup(&mut commands, Vec2::new(300.0, 0.0));
 }
 
 fn create_foods(mut commands: Commands) {
@@ -287,6 +279,7 @@ fn spawn_enemy(
 
     let arms = commands
         .spawn((
+            BodyHead,
             CurrentTile::new(tilemap),
             Predator::new(),
             Predator::brain(),
@@ -361,6 +354,7 @@ fn spawn_rigidbody(
 
     let legs = commands
         .spawn((
+            UserControlled,
             BodyLegs,
             PreviousVelocity(Vec2::ZERO),
             Legged {
@@ -389,6 +383,18 @@ fn spawn_rigidbody(
             Locomotor {
                 desired_velocity: Vec2::new(0.0, 0.0),
             },
+            Emitter {
+                event: SenseEvent::new(
+                    EventType::Auditory {
+                        typ: AuditoryEventType::Scuttle,
+                        affects: HashSet::new(),
+                    },
+                    Vec2::ZERO,
+                    0.6,
+                    5.0,
+                ),
+                interval: Timer::from_seconds(0.5, TimerMode::Repeating),
+            },
             RigidBody::Dynamic,
             Restitution::new(0.1),
             Mass(1.0),
@@ -399,6 +405,7 @@ fn spawn_rigidbody(
 
     let arms = commands
         .spawn((
+            UserControlled,
             BodyHead,
             Legged {
                 facing: Facing::Left,
@@ -503,13 +510,11 @@ fn main() {
     app.add_systems(
         Update,
         (
-            environment::debug_sound,
             resize_render_target,
             spawn_rigidbody.run_if(input_just_pressed(MouseButton::Middle)),
             spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
-            // update_rigidbodies,
-            // camera_movement,
+            // environment::debug_sound,
             tilemap::depth,
             body::render,
             // Prey::process,
@@ -524,6 +529,7 @@ fn main() {
         (
             environment::process,
             environment::sound,
+            environment::emit,
             tilemap::bitmap
                 .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
             tilemap::edit,

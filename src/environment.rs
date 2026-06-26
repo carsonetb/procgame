@@ -42,6 +42,12 @@ pub struct SenseEvent {
     decay_speed: f32,
 }
 
+#[derive(Component, Debug, Clone)]
+pub struct Emitter {
+    pub event: SenseEvent,
+    pub interval: Timer,
+}
+
 impl SenseEvent {
     pub fn new(typ: EventType, position: Vec2, intensity: f32, decay_speed: f32) -> Self {
         Self {
@@ -96,8 +102,8 @@ pub fn sound(
 
 pub fn debug_sound(
     mut gizmos: Gizmos,
-    physics_tilemap: Res<PhysicsTilemap>,
     q_senses: Query<&mut SenseEvent>,
+    physics_tilemap: Res<PhysicsTilemap>,
     q_tilemap: Query<(
         &TilemapSize,
         &TilemapGridSize,
@@ -118,6 +124,50 @@ pub fn debug_sound(
             let pos =
                 affect.center_in_world(map_size, grid_size, tile_size, map_type, anchor) * 2.0;
             gizmos.circle_2d(pos, 5.0, Color::srgb(1.0, 1.0, 0.0));
+        }
+    }
+}
+
+pub fn emit(
+    mut commands: Commands,
+    time: Res<Time>,
+    q_emitter: Query<(&mut Emitter, &Transform)>,
+    physics_tilemap: Res<PhysicsTilemap>,
+    q_tilemap: Query<(
+        &TilemapSize,
+        &TilemapGridSize,
+        &TilemapTileSize,
+        &TilemapType,
+        &TilemapAnchor,
+    )>,
+) {
+    let (map_size, grid_size, tile_size, map_type, anchor) =
+        q_tilemap.get(physics_tilemap.0).unwrap();
+
+    for (mut emitter, transform) in q_emitter {
+        let pos = transform.translation.xy();
+
+        emitter.interval.tick(time.delta());
+        if emitter.interval.just_finished() {
+            let mut new = emitter.event.clone();
+
+            if let EventType::Auditory { affects, .. } = &mut new.event_type {
+                *affects = HashSet::new();
+                affects.insert(
+                    TilePos::from_world_pos(
+                        &(pos / 2.0),
+                        map_size,
+                        grid_size,
+                        tile_size,
+                        map_type,
+                        anchor,
+                    )
+                    .unwrap(),
+                );
+            }
+
+            new.position = pos;
+            commands.spawn(new);
         }
     }
 }

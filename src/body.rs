@@ -117,7 +117,7 @@ impl LocomotorOrchestrator {
 
 pub fn keyboard_movement(
     input: Res<ButtonInput<KeyCode>>,
-    query: Query<(&mut Locomotor), With<UserControlled>>,
+    query: Query<&mut Locomotor, With<UserControlled>>,
 ) {
     let mut movement = Vec2::ZERO;
     if input.pressed(KeyCode::KeyA) {
@@ -133,7 +133,7 @@ pub fn keyboard_movement(
         movement.y = 0.0;
         movement += Vec2::new(0.0, 100.0);
     }
-    for (mut locomotor) in query {
+    for mut locomotor in query {
         locomotor.desired_velocity = movement;
     }
 }

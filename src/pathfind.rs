@@ -3,8 +3,6 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::{helpers::square_grid::neighbors::Neighbors, prelude::*};
 
-use crate::PIXEL_SCALE;
-
 #[derive(Component, Debug, Clone)]
 pub struct Pathfinding {
     pub from: Vec2,
@@ -26,6 +24,14 @@ impl Pathfinding {
     }
 }
 
+fn viable(storage: &TileStorage, pos: TilePos) -> bool {
+    !(storage.get(&TilePos::new(pos.x - 1, pos.y)).is_none()
+        && storage.get(&TilePos::new(pos.x + 1, pos.y)).is_none()
+        && storage.get(&TilePos::new(pos.x, pos.y - 1)).is_none()
+        && storage.get(&TilePos::new(pos.x - 1, pos.y - 1)).is_none()
+        && storage.get(&TilePos::new(pos.x + 1, pos.y - 1)).is_none())
+}
+
 pub fn pathfind(
     mut gizmos: Gizmos,
     q_pathfinding: Query<&mut Pathfinding>,
@@ -43,7 +49,7 @@ pub fn pathfind(
             q_tilemap.get(pathfinding.tilemap).unwrap();
         let mut explored = HashSet::new();
 
-        let origin = TilePos::from_world_pos(
+        let mut origin = TilePos::from_world_pos(
             &(pathfinding.from / 2.0),
             map_size,
             grid_size,
@@ -53,27 +59,16 @@ pub fn pathfind(
         )
         .unwrap();
 
+        while !viable(storage, origin) {
+            origin.y -= 1;
+        }
+
         let mut unexplored: Vec<TilePos> = vec![origin];
 
         for _ in 0..pathfinding.steps {
             let mut new_unexplored = HashSet::new();
             for unexplored in unexplored {
-                if storage
-                    .get(&TilePos::new(unexplored.x - 1, unexplored.y))
-                    .is_none()
-                    && storage
-                        .get(&TilePos::new(unexplored.x + 1, unexplored.y))
-                        .is_none()
-                    && storage
-                        .get(&TilePos::new(unexplored.x, unexplored.y - 1))
-                        .is_none()
-                    && storage
-                        .get(&TilePos::new(unexplored.x - 1, unexplored.y - 1))
-                        .is_none()
-                    && storage
-                        .get(&TilePos::new(unexplored.x + 1, unexplored.y - 1))
-                        .is_none()
-                {
+                if !viable(storage, unexplored) {
                     continue;
                 }
 
