@@ -34,6 +34,7 @@ mod editor;
 mod environment;
 mod food;
 mod pathfind;
+mod plants;
 mod predator;
 mod prerender;
 mod tilemap;
@@ -530,24 +531,25 @@ fn main() {
     app.add_systems(
         FixedPostUpdate,
         (
-            environment::process,
-            environment::sound,
-            environment::emit,
-            tilemap::bitmap
-                .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
-            tilemap::edit,
-            tilemap::update_current_tile,
+            (environment::process, environment::sound, environment::emit),
+            (plants::grow, plants::kill, plants::position, plants::width),
+            (
+                tilemap::bitmap
+                    .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
+                tilemap::edit,
+                tilemap::update_current_tile,
+            ),
             pathfind::pathfind,
-            body::keyboard_movement,
-            body::stand,
-            body::locomote,
-            body::jump,
-            body::animate,
-            body::balance,
-            body::orchestrate,
-            predator::process,
-            predator::attack,
-            predator::translate,
+            (
+                body::keyboard_movement,
+                body::stand,
+                body::locomote,
+                body::jump,
+                body::animate,
+                body::balance,
+                body::orchestrate,
+            ),
+            (predator::process, predator::attack, predator::translate),
         ),
     );
     app.run();
