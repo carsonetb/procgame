@@ -486,7 +486,15 @@ fn main() {
     //     mode: bevy_embedded_assets::PluginMode::ReplaceDefault,
     // });
     app.add_plugins((
-        DefaultPlugins.set(ImagePlugin::default_nearest()),
+        DefaultPlugins
+            .set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    present_mode: bevy::window::PresentMode::AutoNoVsync,
+                    ..default()
+                }),
+                ..default()
+            }),
         TilemapPlugin,
         PhysicsPlugins::default(),
         // PhysicsDebugPlugin,
@@ -517,15 +525,12 @@ fn main() {
             spawn_rigidbody.run_if(input_just_pressed(MouseButton::Middle)),
             spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
-            // environment::debug_sound,
-            // tilemap::depth,
             tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))),
             body::render,
-            // Prey::process,
-            // Prey::eat,
-            // Predator::process,
-            // Predator::attack,
-            // Food::process,
+            plants::render,
+            plants::debug_attractors.run_if(input_pressed(KeyCode::ShiftLeft)),
+            plants::spawn_attractor.run_if(input_just_pressed(KeyCode::KeyA)),
+            plants::spawn_root.run_if(input_just_pressed(KeyCode::KeyR)),
         ),
     );
     app.add_systems(
