@@ -3,6 +3,8 @@ use std::{collections::HashSet, time::Duration};
 use avian2d::prelude::*;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
+    dev_tools::fps_overlay::FpsOverlayPlugin,
+    diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     image::ImageSampler,
     input::common_conditions::{input_just_pressed, input_pressed},
     prelude::*,
@@ -497,7 +499,13 @@ fn main() {
             }),
         TilemapPlugin,
         PhysicsPlugins::default(),
-        // PhysicsDebugPlugin,
+        bevy_spatial::AutomaticUpdate::<plants::Attractor>::new()
+            .with_frequency(Duration::from_secs_f32(1.0))
+            .with_transform(bevy_spatial::TransformMode::Transform)
+            .with_spatial_ds(bevy_spatial::SpatialStructure::KDTree2), // PhysicsDebugPlugin,
+        EntityCountDiagnosticsPlugin::default(),
+        FrameTimeDiagnosticsPlugin::default(),
+        LogDiagnosticsPlugin::default(),
     ));
     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
     app.insert_resource(ClearColor(Color::srgb(0.5, 0.2, 0.2)));
@@ -516,6 +524,7 @@ fn main() {
             // create_predators,
             // create_foods,
             tilemap::setup,
+            plants::setup,
         ),
     );
     app.add_systems(
@@ -528,6 +537,7 @@ fn main() {
             tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))),
             body::render,
             plants::render,
+            plants::debug_plants.run_if(input_pressed(KeyCode::KeyT)),
             plants::debug_attractors.run_if(input_pressed(KeyCode::ShiftLeft)),
             plants::spawn_attractor.run_if(input_just_pressed(KeyCode::KeyA)),
             plants::spawn_root.run_if(input_just_pressed(KeyCode::KeyR)),

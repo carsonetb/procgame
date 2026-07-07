@@ -1,8 +1,15 @@
 use std::{collections::HashMap, f32};
 
 use bevy::prelude::*;
+use bevy_spatial::SpatialAccess;
 
 use crate::{MainCamera, PIXEL_SCALE};
+
+#[derive(Resource)]
+pub struct BranchAssets {
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<ColorMaterial>,
+}
 
 #[derive(Component, Debug, Clone)]
 pub struct Params {
@@ -49,6 +56,17 @@ pub struct Attractor {
     pub pos: Vec2,
 }
 
+pub fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    commands.insert_resource(BranchAssets {
+        mesh: meshes.add(Rectangle::default()),
+        material: materials.add(Color::WHITE),
+    });
+}
+
 pub fn clamp_direction(target_dir: Vec2, reference_dir: Vec2, max_angle_radians: f32) -> Vec2 {
     let target = target_dir.normalize_or_zero();
     let reference = reference_dir.normalize_or_zero();
@@ -71,12 +89,11 @@ pub fn clamp_direction(target_dir: Vec2, reference_dir: Vec2, max_angle_radians:
 
 pub fn grow(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
     time: Res<Time>,
+    tree: Res<bevy_spatial::kdtree::KDTree2<Attractor>>,
+    assets: Res<BranchAssets>,
     q_params: Query<&Params>,
     q_branch: Query<(Entity, &mut Branch), Without<Final>>,
-    q_attractor: Query<(Entity, &Attractor)>,
     q_tip: Query<&Tip>,
 ) {
     let mut attractors = Vec::new();
@@ -85,15 +102,18 @@ pub fn grow(
     for (entity, mut branch) in q_branch {
         let params = q_params.get(branch.params).unwrap();
 
-        for (entity, attractor) in q_attractor {
-            let distance_sq = branch.pos.distance_squared(attractor.pos);
+        for (pos, entity) in tree.within_distance(branch.pos, params.attraction) {
+            let Some(entity) = entity else {
+                continue;
+            };
+            let distance_sq = branch.pos.distance_squared(pos);
             if let Some(other) = distances.get(&entity)
                 && distance_sq > *other
             {
                 continue;
             }
             if distance_sq < params.attraction * params.attraction {
-                attractors.push(attractor.pos);
+                attractors.push(pos);
                 distances.insert(entity, distance_sq);
             }
         }
@@ -118,8 +138,8 @@ pub fn grow(
                         vigor: branch.vigor
                             * (branch.direction.unwrap().dot(Vec2::Y) / 4.0 + 0.75).max(0.1),
                     },
-                    Mesh2d(meshes.add(Rectangle::default())),
-                    MeshMaterial2d(materials.add(Color::WHITE)),
+                    Mesh2d(assets.mesh.clone()),
+                    MeshMaterial2d(assets.material.clone()),
                     Transform::default(),
                 ))
                 .id();
@@ -153,9 +173,9 @@ pub fn grow(
 
 pub fn kill(
     mut commands: Commands,
+    tree: Res<bevy_spatial::kdtree::KDTree2<Attractor>>,
     q_params: Query<&Params>,
     q_branch: Query<&Branch>,
-    q_attractor: Query<(Entity, &Attractor)>,
 ) {
     for branch in q_branch {
         let Some(direction) = branch.direction else {
@@ -164,8 +184,11 @@ pub fn kill(
 
         let params = q_params.get(branch.params).unwrap();
 
-        for (entity, attractor) in q_attractor {
-            if (branch.pos + direction * branch.length).distance(attractor.pos) < params.kill {
+        for (pos, entity) in tree.within_distance(branch.pos, params.attraction) {
+            let Some(entity) = entity else {
+                continue;
+            };
+            if (branch.pos + direction * branch.length).distance(pos) < params.kill {
                 commands.entity(entity).despawn();
             }
         }
@@ -236,7 +259,7 @@ pub fn render(q_branch: Query<(&Branch, &mut Transform)>) {
 pub fn debug_plants(
     mut gizmos: Gizmos,
     q_roots: Query<&Branch, (With<Root>, Without<Tip>)>,
-    q_tips: Query<&Branch, (With<Tip>, Without<Root>)>,
+    q_tips: Query<&Branch, (Without<Root>, Without<Final>)>,
 ) {
     for root in q_roots {
         gizmos.circle_2d(root.pos, 5.0, Color::srgb(1.0, 0.5, 0.2));
@@ -273,13 +296,12 @@ pub fn spawn_attractor(
     };
 
     for _ in 0..10 {
-        commands.spawn(Attractor {
-            pos: cursor
-                + Vec2::new(
-                    rand::random_range(-20.0..20.0),
-                    rand::random_range(-20.0..20.0),
-                ),
-        });
+        let pos = cursor
+            + Vec2::new(
+                rand::random_range(-20.0..20.0),
+                rand::random_range(-20.0..20.0),
+            );
+        commands.spawn((Attractor { pos }, Transform::from_xyz(pos.x, pos.y, 0.0)));
     }
 }
 

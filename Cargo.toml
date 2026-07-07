@@ -17,7 +17,7 @@ incremental = false
 debug = false
 
 [dependencies]
-bevy = { version = "0.18.1", features = ["debug", "dynamic_linking", "trace"] }
+bevy = { version = "0.18.1", features = ["debug", "dynamic_linking", "trace", "bevy_dev_tools"] }
 bevy_ecs_tilemap = { version = "0.18.1", features = ["atlas"] }
 rand = "0.10.1"
 log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
@@ -25,5 +25,6 @@ phf = "0.13.1"
 phf_macros = "0.13.1"
 avian2d = { version = "0.6.1", features = ["debug-plugin"] }
 bitflags = "2.13.0"
+bevy_spatial = { git = "https://github.com/zim32/bevy-spatial", branch = "bevy-0.18" }
 # bevy_feathers = "0.19.0"
 # bevy_embedded_assets = "0.15.0"
