@@ -5,8 +5,9 @@ use bevy::prelude::*;
 use bevy_ecs_tilemap::{helpers::square_grid::neighbors::Neighbors, prelude::*};
 use phf_macros::phf_map;
 use rand::{RngExt, seq::IndexedRandom};
+use serde::{Deserialize, Serialize};
 
-use crate::{MainCamera, PIXEL_SCALE};
+use crate::{MainCamera, PIXEL_SCALE, tilemap};
 
 const TO_BITMAP: phf::Map<(i32, i32), u8> = phf_map! {
     // (-1, 1) =>  0b10000000,
@@ -19,26 +20,29 @@ const TO_BITMAP: phf::Map<(i32, i32), u8> = phf_map! {
     // (1, -1) =>  0b00000001,
 };
 
+/// The command tilemaps.
 #[derive(Resource, Debug, Clone)]
 pub struct TilemapGroups(pub Vec<Entity>);
 
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct PhysicsTilemap(pub Entity);
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum MapType {
     Command,
     Companion(Entity),
 }
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MapDepth(pub i32);
 
-#[derive(Component, Clone)]
+#[derive(Component, Debug, Clone, Serialize, Deserialize)]
 pub struct BitMap {
     map: HashMap<u8, Vec<TileTextureIndex>>,
+    texture: String, // TODO: Should bring this out of BitMap
 }
 
+/// Current tile a creature is on.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct CurrentTile {
     tilemap: Entity,
@@ -52,6 +56,202 @@ impl CurrentTile {
             tile: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveMap {
+    /// Referes to the index of the bitmap this is a part of.
+    tiles: Vec<bool>,
+    depth: MapDepth,
+    z: f32,
+    companion: Option<usize>,
+    bitmap: BitMap,
+}
+
+impl SaveMap {
+    pub fn build(
+        storage: &TileStorage,
+        bitmap: &BitMap,
+        depth: MapDepth,
+        z: f32,
+        companion: Option<usize>,
+    ) -> Self {
+        let mut tiles = Vec::new();
+        for tile in storage.iter() {
+            tiles.push(tile.is_some());
+        }
+
+        Self {
+            tiles,
+            depth,
+            z,
+            companion,
+            bitmap: bitmap.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Save {
+    maps: Vec<SaveMap>,
+    bitmaps: Vec<BitMap>,
+    physics: usize,
+    groups: Vec<usize>,
+}
+
+impl Save {
+    pub fn build(
+        physics: Res<PhysicsTilemap>,
+        groups: Res<TilemapGroups>,
+        q_tilemap: Query<(
+            Entity,
+            &TileStorage,
+            &BitMap,
+            &MapType,
+            &MapDepth,
+            &Transform,
+        )>,
+    ) -> Self {
+        let mut physics_index = 0;
+        let mut groups_indices = Vec::new();
+        let mut maps = Vec::new();
+        let mut bitmaps = Vec::new();
+        let mut commands = HashMap::new();
+        for (i, (entity, storage, bitmap, map_type, depth, transform)) in
+            q_tilemap.iter().enumerate()
+        {
+            if let MapType::Command = map_type {
+                commands.insert(entity, i);
+            }
+
+            bitmaps.push(bitmap.clone());
+            maps.push(SaveMap::build(
+                storage,
+                bitmap,
+                *depth,
+                transform.translation.z,
+                match map_type {
+                    MapType::Command => {
+                        commands.insert(entity, i);
+                        None
+                    }
+                    MapType::Companion(entity) => Some(*commands.get(entity).unwrap()),
+                },
+            ));
+
+            if entity == physics.0 {
+                physics_index = i;
+            }
+
+            if groups.0.contains(&entity) {
+                groups_indices.push(i);
+            }
+        }
+
+        Self {
+            maps,
+            bitmaps,
+            physics: physics_index,
+            groups: groups_indices,
+        }
+    }
+}
+
+pub fn save(
+    physics: Res<PhysicsTilemap>,
+    groups: Res<TilemapGroups>,
+    q_tilemap: Query<(
+        Entity,
+        &TileStorage,
+        &BitMap,
+        &MapType,
+        &MapDepth,
+        &Transform,
+    )>,
+) {
+    let save = Save::build(physics, groups, q_tilemap);
+    let string = ron::to_string(&save).unwrap();
+    std::fs::write("level.ron", string).unwrap();
+}
+
+pub fn load(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let string = std::fs::read_to_string("level.ron").unwrap();
+    let save: Save = ron::from_str(&string).unwrap();
+
+    let size = TilemapSize { x: 80, y: 50 }; // TODO: Currently hardcoded.
+
+    let mut groups = Vec::new();
+    let mut command_map = HashMap::new();
+    for (i, map) in save.maps.iter().enumerate() {
+        let tilemap_entity = commands.spawn_empty().id();
+
+        if map.companion.is_none() {
+            command_map.insert(i, tilemap_entity);
+        }
+
+        let map_type = match map.companion {
+            Some(index) => MapType::Companion(*command_map.get(&index).unwrap()),
+            None => MapType::Command,
+        };
+
+        let tile_size = TilemapTileSize { x: 20.0, y: 20.0 };
+
+        let mut storage = TileStorage::empty(size);
+        for x in 0..size.x {
+            for y in 0..size.y {
+                if !*map.tiles.get((y * size.x + x) as usize).unwrap() {
+                    continue;
+                }
+                let pos = TilePos { x, y };
+                let entity = spawn_tile(
+                    &mut commands,
+                    tilemap_entity,
+                    map_type,
+                    size,
+                    tile_size,
+                    pos,
+                    i == save.physics,
+                );
+                storage.set(&pos, entity);
+            }
+        }
+
+        let tilemap_type = TilemapType::default();
+
+        commands.entity(tilemap_entity).insert((
+            TilemapBundle {
+                grid_size: tile_size.into(),
+                map_type: tilemap_type,
+                size,
+                storage,
+                texture: TilemapTexture::Single(asset_server.load(&map.bitmap.texture)),
+                tile_size,
+                anchor: TilemapAnchor::Center,
+                transform: Transform::from_scale(
+                    Vec3::new(2.0, 2.0, 1.0) * (1.0 + (map.depth.0 as f32) / 420.0),
+                )
+                .with_translation(Vec3::new(0.0, 0.0, map.z)),
+                render_settings: TilemapRenderSettings {
+                    render_chunk_size: UVec2::new(32, 32),
+                    y_sort: false,
+                },
+                ..Default::default()
+            },
+            map.bitmap.clone(),
+            map.depth,
+            map_type,
+        ));
+
+        if i == save.physics {
+            commands.insert_resource(PhysicsTilemap(tilemap_entity));
+        }
+
+        if save.groups.contains(&i) {
+            groups.push(tilemap_entity);
+        }
+    }
+
+    commands.insert_resource(TilemapGroups(groups));
 }
 
 fn spawn_tile(
@@ -97,6 +297,7 @@ fn create_tilemap(
     commands: &mut Commands,
     map_size: TilemapSize,
     image: Handle<Image>,
+    bitmap: BitMap,
     typ: MapType,
     z: f32,
     depth: i32,
@@ -125,6 +326,34 @@ fn create_tilemap(
     let grid_size = tile_size.into();
     let map_type = TilemapType::default();
 
+    let bundle = (
+        TilemapBundle {
+            grid_size,
+            map_type,
+            size: map_size,
+            storage: tile_storage,
+            texture: TilemapTexture::Single(image.clone()),
+            tile_size,
+            anchor: TilemapAnchor::Center,
+            transform: Transform::from_scale(
+                Vec3::new(2.0, 2.0, 1.0) * (1.0 + (depth as f32) / 420.0),
+            )
+            .with_translation(Vec3::new(0.0, 0.0, z)),
+            render_settings: TilemapRenderSettings {
+                render_chunk_size: UVec2::new(32, 32),
+                y_sort: false,
+            },
+            ..Default::default()
+        },
+        bitmap,
+        MapDepth(depth),
+        typ,
+    );
+    commands.entity(tilemap_entity).insert(bundle);
+    tilemap_entity
+}
+
+pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut map = HashMap::new();
     map.insert(0b0011, vec![TileTextureIndex(0), TileTextureIndex(6)]);
     map.insert(0b0111, vec![TileTextureIndex(2), TileTextureIndex(7)]);
@@ -146,34 +375,19 @@ fn create_tilemap(
     map.insert(0b0110, vec![TileTextureIndex(22), TileTextureIndex(23)]);
     map.insert(0b0100, vec![TileTextureIndex(24)]);
 
-    let bundle = (
-        TilemapBundle {
-            grid_size,
-            map_type,
-            size: map_size,
-            storage: tile_storage,
-            texture: TilemapTexture::Single(image),
-            tile_size,
-            anchor: TilemapAnchor::Center,
-            transform: Transform::from_scale(
-                Vec3::new(2.0, 2.0, 1.0) * (1.0 + (depth as f32) / 420.0),
-            )
-            .with_translation(Vec3::new(0.0, 0.0, z)),
-            render_settings: TilemapRenderSettings {
-                render_chunk_size: UVec2::new(32, 32),
-                y_sort: false,
-            },
-            ..Default::default()
-        },
-        BitMap { map },
-        MapDepth(depth),
-        typ,
-    );
-    commands.entity(tilemap_entity).insert(bundle);
-    tilemap_entity
-}
+    let texture_bitmap = BitMap {
+        map: map.clone(),
+        texture: "tilemap.png".into(),
+    };
+    let background_tilemap = BitMap {
+        map: map.clone(),
+        texture: "tilemap_background1.png".into(),
+    };
+    let background_tilemap2 = BitMap {
+        map: map.clone(),
+        texture: "tilemap_background2.png".into(),
+    };
 
-pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let texture_handle: Handle<Image> = asset_server.load("tilemap.png");
     let background_handle: Handle<Image> = asset_server.load("tilemap_background1.png");
     let background_handl2: Handle<Image> = asset_server.load("tilemap_background2.png");
@@ -182,6 +396,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         texture_handle.clone(),
+        texture_bitmap.clone(),
         MapType::Command,
         0.0,
         1,
@@ -193,6 +408,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
+        background_tilemap.clone(),
         MapType::Companion(front),
         -1.0,
         -1,
@@ -202,6 +418,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
+        background_tilemap.clone(),
         MapType::Companion(front),
         -3.0,
         -3,
@@ -211,6 +428,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
+        background_tilemap.clone(),
         MapType::Companion(front),
         -5.0,
         -5,
@@ -220,6 +438,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
+        background_tilemap.clone(),
         MapType::Companion(front),
         -7.0,
         -7,
@@ -229,6 +448,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
+        background_tilemap.clone(),
         MapType::Companion(front),
         -9.0,
         -9,
@@ -238,6 +458,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handl2.clone(),
+        background_tilemap2.clone(),
         MapType::Companion(front),
         -1.0,
         -9,
@@ -248,6 +469,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         texture_handle.clone(),
+        texture_bitmap.clone(),
         MapType::Command,
         -10.0,
         -10,
@@ -258,6 +480,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
+        background_tilemap.clone(),
         MapType::Companion(middle),
         -12.0,
         -12,
@@ -267,6 +490,7 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         &mut commands,
         size,
         background_handle.clone(),
+        background_tilemap.clone(),
         MapType::Companion(middle),
         -14.0,
         -14,

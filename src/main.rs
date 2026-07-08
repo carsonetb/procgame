@@ -3,7 +3,6 @@ use std::{collections::HashSet, time::Duration};
 use avian2d::prelude::*;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
-    dev_tools::fps_overlay::FpsOverlayPlugin,
     diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     image::ImageSampler,
     input::common_conditions::{input_just_pressed, input_pressed},
@@ -488,24 +487,20 @@ fn main() {
     //     mode: bevy_embedded_assets::PluginMode::ReplaceDefault,
     // });
     app.add_plugins((
-        DefaultPlugins
-            .set(ImagePlugin::default_nearest())
-            .set(WindowPlugin {
-                primary_window: Some(Window {
-                    present_mode: bevy::window::PresentMode::AutoNoVsync,
-                    ..default()
-                }),
-                ..default()
-            }),
+        DefaultPlugins.set(ImagePlugin::default_nearest()),
+        // .set(WindowPlugin {
+        //     primary_window: Some(Window {
+        //         present_mode: bevy::window::PresentMode::AutoNoVsync,
+        //         ..default()
+        //     }),
+        //     ..default()
+        // }),
         TilemapPlugin,
         PhysicsPlugins::default(),
         bevy_spatial::AutomaticUpdate::<plants::Attractor>::new()
             .with_frequency(Duration::from_secs_f32(1.0))
             .with_transform(bevy_spatial::TransformMode::Transform)
-            .with_spatial_ds(bevy_spatial::SpatialStructure::KDTree2), // PhysicsDebugPlugin,
-        EntityCountDiagnosticsPlugin::default(),
-        FrameTimeDiagnosticsPlugin::default(),
-        LogDiagnosticsPlugin::default(),
+            .with_spatial_ds(bevy_spatial::SpatialStructure::KDTree2),
     ));
     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
     app.insert_resource(ClearColor(Color::srgb(0.5, 0.2, 0.2)));
@@ -523,7 +518,8 @@ fn main() {
             // create_creatures,
             // create_predators,
             // create_foods,
-            tilemap::setup,
+            // tilemap::setup,
+            (tilemap::load, tilemap::bitmap, tilemap::colordepth).chain(),
             plants::setup,
         ),
     );
@@ -553,6 +549,7 @@ fn main() {
                     .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
                 tilemap::edit,
                 tilemap::update_current_tile,
+                tilemap::save.run_if(input_pressed(KeyCode::KeyK)),
             ),
             pathfind::pathfind,
             (
@@ -569,34 +566,3 @@ fn main() {
     );
     app.run();
 }
-
-// fn main() {
-//     let mut app = App::new();
-//     app.add_plugins((
-//         DefaultPlugins.set(ImagePlugin::default_nearest()),
-//         TilemapPlugin,
-//         PhysicsPlugins::default(),
-//     ));
-//     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
-//     app.add_systems(Startup, (prerender::setup, editor::setup).chain());
-//     app.add_systems(
-//         Update,
-//         (
-//             editor::select_atlas,
-//             editor::select_layer,
-//             editor::select_layer_owner,
-//             editor::edit_tiles,
-//             editor::own_layers,
-//             (
-//                 prerender::clean,
-//                 prerender::bitmap_tile,
-//                 prerender::render_tile,
-//                 prerender::render_level,
-//             )
-//                 .chain()
-//                 .run_if(input_just_pressed(KeyCode::Space)),
-//             prerender::remove_example.run_if(input_just_pressed(KeyCode::Enter)),
-//         ),
-//     );
-//     app.run();
-// }
