@@ -4,10 +4,10 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::{helpers::square_grid::neighbors::Neighbors, prelude::*};
 use phf_macros::phf_map;
-use rand::{RngExt, seq::IndexedRandom};
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 
-use crate::{MainCamera, PIXEL_SCALE, tilemap};
+use crate::{MainCamera, PIXEL_SCALE};
 
 const TO_BITMAP: phf::Map<(i32, i32), u8> = phf_map! {
     // (-1, 1) =>  0b10000000,
@@ -38,8 +38,9 @@ pub struct MapDepth(pub i32);
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize)]
 pub struct BitMap {
-    map: HashMap<u8, Vec<TileTextureIndex>>,
-    texture: String, // TODO: Should bring this out of BitMap
+    pub map: HashMap<u8, Vec<TileTextureIndex>>,
+    pub texture: String, // TODO: Should bring this out of BitMap
+    pub dimensions: UVec2,
 }
 
 /// Current tile a creature is on.
@@ -94,7 +95,6 @@ impl SaveMap {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Save {
     maps: Vec<SaveMap>,
-    bitmaps: Vec<BitMap>,
     physics: usize,
     groups: Vec<usize>,
 }
@@ -115,7 +115,6 @@ impl Save {
         let mut physics_index = 0;
         let mut groups_indices = Vec::new();
         let mut maps = Vec::new();
-        let mut bitmaps = Vec::new();
         let mut commands = HashMap::new();
         for (i, (entity, storage, bitmap, map_type, depth, transform)) in
             q_tilemap.iter().enumerate()
@@ -124,7 +123,6 @@ impl Save {
                 commands.insert(entity, i);
             }
 
-            bitmaps.push(bitmap.clone());
             maps.push(SaveMap::build(
                 storage,
                 bitmap,
@@ -150,7 +148,6 @@ impl Save {
 
         Self {
             maps,
-            bitmaps,
             physics: physics_index,
             groups: groups_indices,
         }
@@ -378,14 +375,17 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let texture_bitmap = BitMap {
         map: map.clone(),
         texture: "tilemap.png".into(),
+        dimensions: UVec2::new(5, 5),
     };
     let background_tilemap = BitMap {
         map: map.clone(),
         texture: "tilemap_background1.png".into(),
+        dimensions: UVec2::new(5, 5),
     };
     let background_tilemap2 = BitMap {
         map: map.clone(),
         texture: "tilemap_background2.png".into(),
+        dimensions: UVec2::new(5, 5),
     };
 
     let texture_handle: Handle<Image> = asset_server.load("tilemap.png");

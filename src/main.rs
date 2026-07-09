@@ -3,13 +3,14 @@ use std::{collections::HashSet, time::Duration};
 use avian2d::prelude::*;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
-    diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    dev_tools::fps_overlay::FpsOverlayPlugin,
     image::ImageSampler,
     input::common_conditions::{input_just_pressed, input_pressed},
     prelude::*,
     render::render_resource::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
+    sprite_render::Material2dPlugin,
     time::common_conditions::on_timer,
     window::WindowResized,
 };
@@ -34,6 +35,7 @@ mod creature;
 mod editor;
 mod environment;
 mod food;
+mod lighting;
 mod pathfind;
 mod plants;
 mod predator;
@@ -495,12 +497,14 @@ fn main() {
         //     }),
         //     ..default()
         // }),
+        Material2dPlugin::<lighting::HeightmapMaterial>::default(),
         TilemapPlugin,
         PhysicsPlugins::default(),
         bevy_spatial::AutomaticUpdate::<plants::Attractor>::new()
             .with_frequency(Duration::from_secs_f32(1.0))
             .with_transform(bevy_spatial::TransformMode::Transform)
             .with_spatial_ds(bevy_spatial::SpatialStructure::KDTree2),
+        FpsOverlayPlugin::default(),
     ));
     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
     app.insert_resource(ClearColor(Color::srgb(0.5, 0.2, 0.2)));
@@ -531,6 +535,7 @@ fn main() {
             spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
             tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))),
+            lighting::save_heightmap.run_if(input_just_pressed(KeyCode::KeyH)),
             body::render,
             plants::render,
             plants::debug_plants.run_if(input_pressed(KeyCode::KeyT)),
