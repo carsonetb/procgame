@@ -185,7 +185,7 @@ pub fn save_heightmap(
 
     let handle = asset_server.add(heightmap.image);
     let settings = ShadowSettings {
-        light_dir: Vec3::new(-1.0, -0.5, 1.0),
+        light_dir: Vec3::new(-1.0, -0.5, 0.8),
         height_scale: 20.0,
         shadow_color: Vec4::new(0.0, 0.0, 0.0, 0.5),
         step_size: 0.001,

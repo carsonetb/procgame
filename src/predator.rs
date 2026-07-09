@@ -166,7 +166,6 @@ pub fn process(
 }
 
 pub fn translate(
-    mut gizmos: Gizmos,
     spatial_query: SpatialQuery,
     query: Query<(
         Entity,
@@ -211,7 +210,7 @@ pub fn translate(
                 if direction.y.abs() > 0.5 && direction.y.signum() == movement.y.signum() {
                     movement.y = 0.0;
                 }
-                gizmos.line_2d(pos, pos + direction.as_vec2() * 20.0, Color::BLACK);
+                // gizmos.line_2d(pos, pos + direction.as_vec2() * 20.0, Color::BLACK);
             }
         }
 
