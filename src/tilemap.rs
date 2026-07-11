@@ -375,17 +375,17 @@ pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let texture_bitmap = BitMap {
         map: map.clone(),
         texture: "tilemap.png".into(),
-        dimensions: UVec2::new(5, 5),
+        dimensions: UVec2::new(10, 5),
     };
     let background_tilemap = BitMap {
         map: map.clone(),
         texture: "tilemap_background1.png".into(),
-        dimensions: UVec2::new(5, 5),
+        dimensions: UVec2::new(10, 5),
     };
     let background_tilemap2 = BitMap {
         map: map.clone(),
         texture: "tilemap_background2.png".into(),
-        dimensions: UVec2::new(5, 5),
+        dimensions: UVec2::new(10, 5),
     };
 
     let texture_handle: Handle<Image> = asset_server.load("tilemap.png");

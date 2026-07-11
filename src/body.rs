@@ -7,19 +7,19 @@ pub enum Elbow {
     Up,
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Default, Debug, Clone)]
 pub struct ConnectedBodies(pub Vec<Entity>);
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Default, Debug, Clone, Copy)]
 pub struct BodyHead;
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Default, Debug, Clone, Copy)]
 pub struct BodyLegs;
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Default, Debug, Clone, Copy)]
 pub struct PreviousVelocity(pub Vec2);
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Default, Debug, Clone, Copy)]
 pub struct UserControlled;
 
 impl Elbow {
@@ -40,6 +40,7 @@ impl Elbow {
 #[derive(Debug, Clone)]
 pub struct Leg {
     pub directions: Vec<Vec2>,
+    pub offset: Vec2,
     pub hang_direction: Vec2,
     pub current_direction: Vec2,
     pub length: f32,
@@ -56,6 +57,7 @@ pub struct Leg {
 impl Leg {
     pub fn new(
         directions: Vec<Vec2>,
+        offset: Vec2,
         hang_direction: Vec2,
         length: f32,
         stiffness: f32,
@@ -65,6 +67,7 @@ impl Leg {
     ) -> Self {
         Self {
             current_direction: directions[0],
+            offset,
             directions,
             hang_direction,
             length,
@@ -80,9 +83,10 @@ impl Leg {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 pub enum Facing {
     Left,
+    #[default]
     Right,
 }
 
@@ -95,13 +99,13 @@ impl Facing {
     }
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Component, Default, Debug, Clone)]
 pub struct Legged {
     pub facing: Facing,
     pub legs: Vec<Leg>,
 }
 
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Default, Debug, Clone, Copy)]
 pub struct Locomotor {
     pub desired_velocity: Vec2,
 }
@@ -112,29 +116,6 @@ pub struct LocomotorOrchestrator(pub Vec<Entity>);
 impl LocomotorOrchestrator {
     pub fn new() -> Self {
         Self(Vec::new())
-    }
-}
-
-pub fn keyboard_movement(
-    input: Res<ButtonInput<KeyCode>>,
-    query: Query<&mut Locomotor, With<UserControlled>>,
-) {
-    let mut movement = Vec2::ZERO;
-    if input.pressed(KeyCode::KeyA) {
-        movement += Vec2::new(-100.0, 0.0);
-    }
-    if input.pressed(KeyCode::KeyD) {
-        movement += Vec2::new(100.0, 0.0);
-    }
-    if input.pressed(KeyCode::KeyS) {
-        movement += Vec2::new(0.0, -70.0);
-    }
-    if input.pressed(KeyCode::KeyW) {
-        movement.y = 0.0;
-        movement += Vec2::new(0.0, 100.0);
-    }
-    for mut locomotor in query {
-        locomotor.desired_velocity = movement;
     }
 }
 
@@ -155,6 +136,7 @@ pub fn stand(
         let origin = transform.translation.xy();
         let scale = legged.facing.scale();
         for leg in &mut legged.legs {
+            let origin = origin + leg.offset;
             let mut excluded = vec![entity];
             if let Some(connected) = connected {
                 for connected in &connected.0 {
@@ -184,8 +166,13 @@ pub fn stand(
             if let Some(hit_data) = lowest_data {
                 let backwards = -leg.current_direction.normalize();
                 let speed = forces.linear_velocity().dot(backwards);
-                let force =
-                    leg.stiffness * (leg.hold_length - hit_data.distance) - leg.damping * speed;
+                let multiplier = if hit_data.distance > leg.hold_length {
+                    0.3
+                } else {
+                    1.0
+                };
+                let force = leg.stiffness * (leg.hold_length - hit_data.distance) * multiplier
+                    - leg.damping * speed;
                 if !leg.stepping {
                     forces.apply_force(backwards * force);
                 }
@@ -315,19 +302,12 @@ pub fn animate(query: Query<(Forces, &mut Legged, &Transform), With<RigidBody>>)
     }
 }
 
-pub fn render(
-    mut gizmos: Gizmos,
-    query: Query<(&mut Legged, &Transform, &Collider), With<RigidBody>>,
-) {
-    for (mut legged, transform, collider) in query {
+pub fn render(mut gizmos: Gizmos, query: Query<(&mut Legged, &Transform), With<RigidBody>>) {
+    for (mut legged, transform) in query {
         let origin = transform.translation.xy();
-        gizmos.circle_2d(
-            origin,
-            collider.shape().as_ball().unwrap().radius,
-            Color::srgb(1.0, 0.0, 1.0),
-        );
         let facing = legged.facing;
         for leg in &mut legged.legs {
+            let origin = origin + leg.offset;
             let end = leg.position;
             let distance = origin.distance(end);
             let l1 = leg.length / 2.0;

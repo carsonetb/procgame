@@ -38,6 +38,7 @@ mod food;
 mod lighting;
 mod pathfind;
 mod plants;
+mod player;
 mod predator;
 mod prerender;
 mod tilemap;
@@ -120,7 +121,7 @@ fn resize_render_target(
     target: Res<PixelRenderTarget>,
 ) {
     for event in resize_events.read() {
-        if let Some(image) = images.get_mut(&target.0) {
+        if let Some(mut image) = images.get_mut(&target.0) {
             let width = ((event.width / PIXEL_SCALE).ceil() as u32).max(1);
             let height = ((event.height / PIXEL_SCALE).ceil() as u32).max(1);
 
@@ -253,6 +254,7 @@ fn spawn_enemy(
                 legs: vec![
                     Leg::new(
                         vec![Vec2::new(0.4, -1.0), Vec2::new(0.5, -0.5)],
+                        Vec2::new(5.0, 0.0),
                         Vec2::new(0.3, -1.0),
                         35.0,
                         160.0,
@@ -262,6 +264,7 @@ fn spawn_enemy(
                     ),
                     Leg::new(
                         vec![Vec2::new(-0.2, -1.0), Vec2::new(0.5, -0.5)],
+                        Vec2::new(-5.0, 0.0),
                         Vec2::new(-0.3, -1.0),
                         35.0,
                         160.0,
@@ -298,6 +301,7 @@ fn spawn_enemy(
                             Vec2::new(0.0, 1.0),
                             Vec2::new(0.5, 0.5),
                         ],
+                        Vec2::new(-5.0, 0.0),
                         Vec2::new(-0.7, -1.0),
                         40.0,
                         80.0,
@@ -311,6 +315,7 @@ fn spawn_enemy(
                             Vec2::new(0.0, 1.0),
                             Vec2::new(0.8, 0.5),
                         ],
+                        Vec2::new(5.0, 0.0),
                         Vec2::new(0.7, -1.0),
                         40.0,
                         80.0,
@@ -324,128 +329,6 @@ fn spawn_enemy(
                 desired_velocity: Vec2::new(0.0, 0.0),
             },
             LocomotorOrchestrator(vec![legs]),
-            RigidBody::Dynamic,
-            Restitution::new(0.1),
-            Mass(0.5),
-            Collider::circle(10.0),
-            Transform::from_xyz(cursor.x, cursor.y, 0.0),
-            ConnectedBodies(vec![legs]),
-        ))
-        .id();
-
-    commands.entity(legs).insert(ConnectedBodies(vec![arms]));
-
-    commands.spawn(DistanceJoint::new(legs, arms).with_limits(0.0, 20.0));
-}
-
-fn spawn_rigidbody(
-    mut commands: Commands,
-    window_query: Query<&Window>,
-    camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
-) {
-    let Ok(window) = window_query.single() else {
-        return;
-    };
-    let Ok((camera, camera_transform)) = camera_query.single() else {
-        return;
-    };
-    let Some(cursor) = window.cursor_position().and_then(|cursor| {
-        camera
-            .viewport_to_world_2d(camera_transform, cursor / PIXEL_SCALE)
-            .ok()
-    }) else {
-        return;
-    };
-
-    let legs = commands
-        .spawn((
-            UserControlled,
-            BodyLegs,
-            PreviousVelocity(Vec2::ZERO),
-            Legged {
-                facing: Facing::Left,
-                legs: vec![
-                    Leg::new(
-                        vec![Vec2::new(0.4, -1.0), Vec2::new(0.5, -0.5)],
-                        Vec2::new(0.3, -1.0),
-                        25.0,
-                        160.0,
-                        16.0,
-                        22.0,
-                        Elbow::Down,
-                    ),
-                    Leg::new(
-                        vec![Vec2::new(-0.2, -1.0), Vec2::new(0.5, -0.5)],
-                        Vec2::new(-0.3, -1.0),
-                        25.0,
-                        160.0,
-                        16.0,
-                        22.0,
-                        Elbow::Down,
-                    ),
-                ],
-            },
-            Locomotor {
-                desired_velocity: Vec2::new(0.0, 0.0),
-            },
-            Emitter {
-                event: SenseEvent::new(
-                    EventType::Auditory {
-                        typ: AuditoryEventType::Scuttle,
-                        affects: HashSet::new(),
-                    },
-                    Vec2::ZERO,
-                    0.6,
-                    5.0,
-                ),
-                interval: Timer::from_seconds(0.5, TimerMode::Repeating),
-            },
-            RigidBody::Dynamic,
-            Restitution::new(0.1),
-            Mass(1.0),
-            Collider::circle(10.0),
-            Transform::from_xyz(cursor.x, cursor.y, 0.0),
-        ))
-        .id();
-
-    let arms = commands
-        .spawn((
-            UserControlled,
-            BodyHead,
-            Legged {
-                facing: Facing::Left,
-                legs: vec![
-                    Leg::new(
-                        vec![
-                            Vec2::new(-0.8, 0.5),
-                            Vec2::new(0.0, 1.0),
-                            Vec2::new(0.5, 0.5),
-                        ],
-                        Vec2::new(-0.7, -1.0),
-                        30.0,
-                        80.0,
-                        8.0,
-                        22.0,
-                        Elbow::Up,
-                    ),
-                    Leg::new(
-                        vec![
-                            Vec2::new(-0.5, 0.5),
-                            Vec2::new(0.0, 1.0),
-                            Vec2::new(0.8, 0.5),
-                        ],
-                        Vec2::new(0.7, -1.0),
-                        30.0,
-                        80.0,
-                        8.0,
-                        22.0,
-                        Elbow::Up,
-                    ),
-                ],
-            },
-            Locomotor {
-                desired_velocity: Vec2::new(0.0, 0.0),
-            },
             RigidBody::Dynamic,
             Restitution::new(0.1),
             Mass(0.5),
@@ -523,7 +406,13 @@ fn main() {
             // create_predators,
             // create_foods,
             // tilemap::setup,
-            (tilemap::load, tilemap::bitmap, tilemap::colordepth).chain(),
+            (
+                tilemap::load,
+                tilemap::bitmap,
+                tilemap::colordepth,
+                // lighting::trigger_heightmap_work,
+            )
+                .chain(),
             plants::setup,
         ),
     );
@@ -531,11 +420,12 @@ fn main() {
         Update,
         (
             resize_render_target,
-            spawn_rigidbody.run_if(input_just_pressed(MouseButton::Middle)),
+            player::spawn_at_mouse.run_if(input_just_pressed(MouseButton::Middle)),
             spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
-            // tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))),
-            lighting::save_heightmap.run_if(input_just_pressed(KeyCode::KeyH)),
+            // tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))), // TODO: This lags, disable it later
+            lighting::trigger_heightmap_work.run_if(input_just_pressed(KeyCode::KeyH)),
+            lighting::poll_heightmap_work,
             body::render,
             plants::render,
             plants::debug_plants.run_if(input_pressed(KeyCode::KeyT)),
@@ -558,7 +448,6 @@ fn main() {
             ),
             pathfind::pathfind,
             (
-                body::keyboard_movement,
                 body::stand,
                 body::locomote,
                 body::jump,
@@ -567,6 +456,8 @@ fn main() {
                 body::orchestrate,
             ),
             (predator::process, predator::attack, predator::translate),
+            player::movement,
+            (player::update_sprites, player::point_sprites).chain(),
         ),
     );
     app.run();

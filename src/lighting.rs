@@ -4,15 +4,19 @@ use bevy::{
     prelude::*,
     render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat},
     sprite_render::Material2d,
-    tasks::Task,
+    tasks::{AsyncComputeTaskPool, Task, block_on, poll_once},
 };
 use bevy_ecs_tilemap::prelude::*;
 
-use crate::tilemap::{BitMap, MapDepth, MapType};
+use crate::{
+    plants::Branch,
+    tilemap::{BitMap, MapDepth},
+};
 
 pub struct LightingLayer {
     pub atlas: Image,
     pub tiles: Vec<Option<UVec2>>,
+    pub plants: Vec<Transform>,
     pub depth: i32,
     pub scale: f32,
     pub tile_size: f32,
@@ -86,9 +90,29 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
             let pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
 
             for layer in &data.layers {
+                let colordepth = 1.0 + (layer.depth as f32) / 20.0;
+                let already = image.get_color_at(x, data.size.y - y - 1).unwrap();
+                if colordepth < already.to_srgba().red {
+                    continue;
+                }
+
                 let relative = (pos - half) / (layer.scale / 2.0) + half;
                 let grid = (relative / layer.tile_size).floor().as_uvec2();
                 let index = grid.y * layer.map_size.x + grid.x;
+
+                for transform in &layer.plants {
+                    let world = (pos - half) * 2.0;
+                    let inverse = transform.compute_affine().inverse();
+                    let local = inverse.transform_point3(world.extend(0.0));
+                    if local.length() < 1.0 {
+                        image
+                            .set_color_at(x, data.size.y - y - 1, Color::srgb(colordepth, 0.0, 0.0))
+                            .unwrap();
+
+                        break;
+                    }
+                }
+
                 if let Some(Some(atlas_point)) = layer.tiles.get(index as usize) {
                     let local_relative = relative - (grid.as_vec2() * layer.tile_size);
                     let pixel_in_tile = local_relative.floor().as_uvec2();
@@ -105,12 +129,6 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
                         continue;
                     }
 
-                    let colordepth = 1.0 + (layer.depth as f32) / 20.0;
-                    let already = image.get_color_at(x, data.size.y - y - 1).unwrap();
-                    if colordepth < already.to_srgba().red {
-                        continue;
-                    }
-
                     image
                         .set_color_at(x, data.size.y - y - 1, Color::srgb(colordepth, 0.0, 0.0))
                         .unwrap();
@@ -122,12 +140,11 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
     Heightmap { image }
 }
 
-pub fn save_heightmap(
+pub fn trigger_heightmap_work(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<HeightmapMaterial>>,
     asset_server: Res<AssetServer>,
     images: Res<Assets<Image>>,
+    q_plants: Query<&Transform, With<Branch>>,
     q_tilemap: Query<(
         &TileStorage,
         &BitMap,
@@ -137,7 +154,69 @@ pub fn save_heightmap(
         &TilemapSize,
     )>,
     q_tiles: Query<&TileTextureIndex>,
+    q_lighting: Query<Entity, With<MeshMaterial2d<HeightmapMaterial>>>,
 ) {
+    for entity in q_lighting {
+        commands.entity(entity).despawn();
+    }
+
+    let task = save_heightmap(asset_server, images, q_plants, q_tilemap, q_tiles);
+
+    commands.spawn(LightingTask(task));
+}
+
+pub fn poll_heightmap_work(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<HeightmapMaterial>>,
+    asset_server: Res<AssetServer>,
+    tasks: Query<(Entity, &mut LightingTask)>,
+) {
+    for (entity, mut task) in tasks {
+        if let Some(heightmap) = block_on(poll_once(&mut task.0)) {
+            let dynamic = heightmap.image.clone().try_into_dynamic().unwrap();
+            dynamic.save("heightmap.png").unwrap();
+
+            let handle = asset_server.add(heightmap.image);
+            let settings = ShadowSettings {
+                light_dir: Vec3::new(-1.0, -0.5, 0.8),
+                height_scale: 20.0,
+                shadow_color: Vec4::new(0.0, 0.0, 0.0, 0.5),
+                step_size: 0.001,
+                max_steps: 30,
+                _padding: Vec2::default(),
+            };
+            let material = HeightmapMaterial {
+                heightmap: handle,
+                settings,
+            };
+
+            commands.spawn((
+                Mesh2d(meshes.add(Rectangle::new(80.0 * 20.0, 50.0 * 20.0))),
+                MeshMaterial2d(materials.add(material)),
+                Transform::from_scale(Vec3::splat(2.0)),
+                Visibility::default(),
+            ));
+
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+pub fn save_heightmap(
+    asset_server: Res<AssetServer>,
+    images: Res<Assets<Image>>,
+    q_plants: Query<&Transform, With<Branch>>,
+    q_tilemap: Query<(
+        &TileStorage,
+        &BitMap,
+        &MapDepth,
+        &Transform,
+        &TilemapTileSize,
+        &TilemapSize,
+    )>,
+    q_tiles: Query<&TileTextureIndex>,
+) -> Task<Heightmap> {
     let mut layers = Vec::new();
 
     for (storage, bitmap, depth, transform, tile_size, tilemap_size) in q_tilemap {
@@ -171,6 +250,11 @@ pub fn save_heightmap(
             tile_size,
             map_size,
             atlas_size: bitmap.dimensions * 20,
+            plants: if depth == 1 {
+                q_plants.into_iter().cloned().collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            },
         });
     }
 
@@ -179,28 +263,6 @@ pub fn save_heightmap(
         size: UVec2::new(80 * 20, 50 * 20),
     };
 
-    let heightmap = construct_heightmap(data);
-    let dynamic = heightmap.image.clone().try_into_dynamic().unwrap();
-    dynamic.save("heightmap.png").unwrap();
-
-    let handle = asset_server.add(heightmap.image);
-    let settings = ShadowSettings {
-        light_dir: Vec3::new(-1.0, -0.5, 0.8),
-        height_scale: 20.0,
-        shadow_color: Vec4::new(0.0, 0.0, 0.0, 0.5),
-        step_size: 0.001,
-        max_steps: 30,
-        _padding: Vec2::default(),
-    };
-    let material = HeightmapMaterial {
-        heightmap: handle,
-        settings,
-    };
-
-    commands.spawn((
-        Mesh2d(meshes.add(Rectangle::new(80.0 * 20.0, 50.0 * 20.0))),
-        MeshMaterial2d(materials.add(material)),
-        Transform::from_scale(Vec3::splat(2.0)),
-        Visibility::default(),
-    ));
+    let thread_pool = AsyncComputeTaskPool::get();
+    thread_pool.spawn(async move { construct_heightmap(data) })
 }

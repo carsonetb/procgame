@@ -293,7 +293,7 @@ pub fn render_level(
         }
     }
 
-    let image = images.get_mut(&level.image).unwrap();
+    let mut image = images.get_mut(&level.image).unwrap();
     assert_eq!(level.output.width, image.width());
     assert_eq!(level.output.height, image.height());
 
