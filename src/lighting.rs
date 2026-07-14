@@ -1,6 +1,5 @@
 use bevy::{
     asset::RenderAssetUsages,
-    math::{NormedVectorSpace, VectorSpace},
     prelude::*,
     render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat},
     sprite_render::Material2d,

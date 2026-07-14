@@ -11,7 +11,6 @@ use bevy::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
     sprite_render::Material2dPlugin,
-    time::common_conditions::on_timer,
     window::WindowResized,
 };
 use bevy_ecs_tilemap::prelude::*;
@@ -19,11 +18,12 @@ use bevy_ecs_tilemap::prelude::*;
 
 use crate::{
     body::{
-        BodyHead, BodyLegs, ConnectedBodies, Elbow, Facing, Leg, Legged, Locomotor,
-        LocomotorOrchestrator, PreviousVelocity, UserControlled,
+        BodyHead, ConnectedBodies, Elbow, Facing, Holding, Leg, Legged, Locomotor,
+        LocomotorOrchestrator, PreviousVelocity,
     },
-    environment::{AuditoryEventType, Emitter, EventType, SenseEvent},
+    environment::{AuditoryEventType, EventType, SenseEvent},
     food::Food,
+    instance::Instance,
     pathfind::Pathfinding,
     predator::Predator,
     tilemap::{CurrentTile, MapDepth},
@@ -31,10 +31,14 @@ use crate::{
 
 mod body;
 mod brain;
+mod bullets;
 mod creature;
 mod editor;
 mod environment;
 mod food;
+mod health;
+mod instance;
+mod items;
 mod lighting;
 mod pathfind;
 mod plants;
@@ -273,6 +277,7 @@ fn spawn_enemy(
                         Elbow::Down,
                     ),
                 ],
+                holding: None,
             },
             Locomotor {
                 desired_velocity: Vec2::new(0.0, 0.0),
@@ -291,7 +296,7 @@ fn spawn_enemy(
             CurrentTile::new(tilemap),
             Predator::new(),
             Predator::brain(),
-            Pathfinding::new(tilemap, cursor, cursor, 4),
+            Pathfinding::new(Instance::from(tilemap), cursor, cursor, 4),
             Legged {
                 facing: Facing::Left,
                 legs: vec![
@@ -324,6 +329,7 @@ fn spawn_enemy(
                         Elbow::Up,
                     ),
                 ],
+                holding: None,
             },
             Locomotor {
                 desired_velocity: Vec2::new(0.0, 0.0),
@@ -334,11 +340,13 @@ fn spawn_enemy(
             Mass(0.5),
             Collider::circle(10.0),
             Transform::from_xyz(cursor.x, cursor.y, 0.0),
-            ConnectedBodies(vec![legs]),
+            ConnectedBodies(vec![Instance::from(legs)]),
         ))
         .id();
 
-    commands.entity(legs).insert(ConnectedBodies(vec![arms]));
+    commands
+        .entity(legs)
+        .insert(ConnectedBodies(vec![Instance::from(arms)]));
 
     commands.spawn(DistanceJoint::new(legs, arms).with_limits(0.0, 20.0));
 }
@@ -371,6 +379,7 @@ fn main() {
     // app.add_plugins(EmbeddedAssetPlugin {
     //     mode: bevy_embedded_assets::PluginMode::ReplaceDefault,
     // });
+    // app.add_plugins(steamworks::SteamworksPlugin::init_app(480).unwrap());
     app.add_plugins((
         DefaultPlugins.set(ImagePlugin::default_nearest()),
         // .set(WindowPlugin {
@@ -414,6 +423,8 @@ fn main() {
             )
                 .chain(),
             plants::setup,
+            bullets::setup,
+            items::setup,
         ),
     );
     app.add_systems(
@@ -454,10 +465,13 @@ fn main() {
                 body::animate,
                 body::balance,
                 body::orchestrate,
+                body::hold,
             ),
             (predator::process, predator::attack, predator::translate),
             player::movement,
             (player::update_sprites, player::point_sprites).chain(),
+            (bullets::gravity, bullets::travel),
+            (health::damage, health::cooldown),
         ),
     );
     app.run();

@@ -1,6 +1,11 @@
 use avian2d::prelude::*;
 use bevy::{math::ops::atan2, prelude::*};
 
+use crate::{
+    instance::Instance,
+    items::{HoldPoints, Item},
+};
+
 #[derive(Debug, Clone, Copy)]
 pub enum Elbow {
     Down,
@@ -8,7 +13,7 @@ pub enum Elbow {
 }
 
 #[derive(Component, Default, Debug, Clone)]
-pub struct ConnectedBodies(pub Vec<Entity>);
+pub struct ConnectedBodies(pub Vec<Instance<RigidBody>>);
 
 #[derive(Component, Default, Debug, Clone, Copy)]
 pub struct BodyHead;
@@ -99,10 +104,18 @@ impl Facing {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Holding {
+    pub holding: Instance<Item>,
+    pub offset: Vec2,
+    pub hands: i32,
+}
+
 #[derive(Component, Default, Debug, Clone)]
 pub struct Legged {
     pub facing: Facing,
     pub legs: Vec<Leg>,
+    pub holding: Option<Holding>,
 }
 
 #[derive(Component, Default, Debug, Clone, Copy)]
@@ -112,12 +125,6 @@ pub struct Locomotor {
 
 #[derive(Component, Debug, Clone)]
 pub struct LocomotorOrchestrator(pub Vec<Entity>);
-
-impl LocomotorOrchestrator {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-}
 
 pub fn stand(
     spatial_query: SpatialQuery,
@@ -140,7 +147,7 @@ pub fn stand(
             let mut excluded = vec![entity];
             if let Some(connected) = connected {
                 for connected in &connected.0 {
-                    excluded.push(*connected);
+                    excluded.push(connected.entity);
                 }
             }
 
@@ -190,7 +197,7 @@ pub fn balance(
     mut other_query: Query<(Forces, &mut PreviousVelocity), Without<BodyHead>>,
 ) {
     for (mut forces, connected) in query {
-        let (other_forces, mut previous) = other_query.get_mut(connected.0[0]).unwrap();
+        let (other_forces, mut previous) = other_query.get_mut(connected.0[0].entity).unwrap();
         let acceleration = previous.0 - other_forces.linear_velocity() / time.delta_secs();
         forces.apply_force(
             Vec2::new(0.0, 600.0)
@@ -203,13 +210,18 @@ pub fn balance(
 
 pub fn locomote(mut query: Query<(Forces, &Locomotor, &mut Legged), With<RigidBody>>) {
     for (mut forces, locomotor, mut legged) in query.iter_mut() {
+        let mut discounted = 0;
+        if let Some(holding) = &legged.holding {
+            discounted += holding.hands;
+        }
+
         legged.facing = if locomotor.desired_velocity.x < 0.0 {
             Facing::Left
         } else {
             Facing::Right
         };
 
-        for leg in &mut legged.legs {
+        for leg in &mut legged.legs.iter().skip(discounted as usize) {
             if leg.stepping {
                 continue;
             }
@@ -223,6 +235,20 @@ pub fn locomote(mut query: Query<(Forces, &Locomotor, &mut Legged), With<RigidBo
                 40.0 * (locomotor.desired_velocity - forces.linear_velocity()) * (leverage - 0.05);
             forces.apply_force(force);
         }
+    }
+}
+
+pub fn hold(
+    q_legged: Query<(&Legged, &Transform), Without<Item>>,
+    mut q_item: Query<&mut Transform, With<Item>>,
+) {
+    for (legged, transform) in q_legged {
+        let Some(holding) = &legged.holding else {
+            continue;
+        };
+
+        let mut item_transform = q_item.get_mut(holding.holding.entity).unwrap();
+        item_transform.translation = (transform.translation.xy() + holding.offset).extend(0.0);
     }
 }
 
@@ -254,13 +280,27 @@ pub fn jump(query: Query<(Forces, &Locomotor, &Legged), With<BodyLegs>>) {
     }
 }
 
-pub fn animate(query: Query<(Forces, &mut Legged, &Transform), With<RigidBody>>) {
-    for (forces, mut legged, transform) in query {
+pub fn animate(
+    q_legged: Query<(Forces, &mut Legged, &Transform), With<RigidBody>>,
+    q_item: Query<&HoldPoints, With<Item>>,
+) {
+    for (forces, mut legged, transform) in q_legged {
         let origin = transform.translation.xy();
+
+        if let Some(holding) = legged.holding.clone() {
+            let item = q_item.get(holding.holding.entity).unwrap();
+            legged.legs[0].position = origin + holding.offset + item.primary;
+            if let Some(secondary) = item.secondary {
+                legged.legs[1].position = origin + holding.offset + secondary;
+            }
+            continue;
+        }
+
         let mut any_stepping = legged
             .legs
             .iter()
             .any(|leg| leg.stepping && leg.move_target.is_some());
+
         for leg in &mut legged.legs {
             if let Some(hit_data) = leg.hit_data {
                 let center =

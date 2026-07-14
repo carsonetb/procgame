@@ -3,7 +3,7 @@ use std::{collections::HashMap, f32};
 use bevy::prelude::*;
 use bevy_spatial::SpatialAccess;
 
-use crate::{MainCamera, PIXEL_SCALE};
+use crate::{MainCamera, PIXEL_SCALE, instance::Instance};
 
 #[derive(Resource)]
 pub struct BranchAssets {
@@ -48,7 +48,7 @@ pub struct Branch {
     pub length: f32,
     pub width: f32,
     pub vigor: f32,
-    pub params: Entity,
+    pub params: Instance<Params>,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -100,7 +100,7 @@ pub fn grow(
     let mut distances = HashMap::new();
 
     for (entity, mut branch) in q_branch {
-        let params = q_params.get(branch.params).unwrap();
+        let params = q_params.get(branch.params.entity).unwrap();
 
         for (pos, entity) in tree.within_distance(branch.pos, params.attraction) {
             let Some(entity) = entity else {
@@ -182,7 +182,7 @@ pub fn kill(
             continue;
         };
 
-        let params = q_params.get(branch.params).unwrap();
+        let params = q_params.get(branch.params.entity).unwrap();
 
         for (pos, entity) in tree.within_distance(branch.pos, params.attraction) {
             let Some(entity) = entity else {
@@ -218,7 +218,7 @@ pub fn width(q_params: Query<&Params>, mut q_branches: Query<(Entity, &mut Branc
     let mut new_widths = Vec::with_capacity(q_branches.iter().count());
 
     for (entity, branch) in q_branches.iter() {
-        let params = q_params.get(branch.params).unwrap();
+        let params = q_params.get(branch.params.entity).unwrap();
 
         let area_sum = branch
             .offshoots
@@ -350,7 +350,7 @@ pub fn spawn_root(
             length: 0.0,
             width: 2.0,
             vigor: 1.0,
-            params,
+            params: Instance::from(params),
         },
         Mesh2d(meshes.add(Rectangle::default())),
         MeshMaterial2d(materials.add(Color::WHITE)),

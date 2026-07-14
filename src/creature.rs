@@ -176,7 +176,7 @@ pub fn translate(
         let mut excluded = vec![entity];
         if let Some(connected) = connected {
             for connected in &connected.0 {
-                excluded.push(*connected);
+                excluded.push(connected.entity);
             }
         }
 

@@ -3,17 +3,19 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::{helpers::square_grid::neighbors::Neighbors, prelude::*};
 
+use crate::instance::Instance;
+
 #[derive(Component, Debug, Clone)]
 pub struct Pathfinding {
     pub from: Vec2,
     pub to: Vec2,
     pub steps: i32,
     pub direction: Option<Vec2>,
-    pub tilemap: Entity,
+    pub tilemap: Instance<TileStorage>,
 }
 
 impl Pathfinding {
-    pub fn new(tilemap: Entity, from: Vec2, to: Vec2, steps: i32) -> Self {
+    pub fn new(tilemap: Instance<TileStorage>, from: Vec2, to: Vec2, steps: i32) -> Self {
         Self {
             from,
             to,
@@ -46,7 +48,7 @@ pub fn pathfind(
 ) {
     for mut pathfinding in q_pathfinding {
         let (storage, map_size, grid_size, tile_size, map_type, anchor) =
-            q_tilemap.get(pathfinding.tilemap).unwrap();
+            q_tilemap.get(pathfinding.tilemap.entity).unwrap();
         let mut explored = HashSet::new();
 
         let mut origin = TilePos::from_world_pos(

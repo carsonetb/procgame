@@ -3,13 +3,10 @@ use std::{collections::HashSet, f32::consts::PI};
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{MainCamera, PIXEL_SCALE, body::*, environment::*};
-
-#[derive(Component, Default, Debug, Clone, Copy)]
-pub struct Player;
+use crate::{MainCamera, PIXEL_SCALE, body::*, environment::*, instance::Instance, items::*};
 
 #[derive(Component, Debug, Clone, Copy)]
-pub struct ConnectedSprite(pub Entity);
+pub struct ConnectedSprite(pub Instance<Transform>);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct PointTowards {
@@ -24,7 +21,7 @@ pub fn update_sprites(
     q_other: Query<&Transform, Without<ConnectedSprite>>,
 ) {
     for (mut transform, ConnectedSprite(connected)) in q_connected {
-        let other_transform = q_other.get(*connected).unwrap();
+        let other_transform = q_other.get(connected.entity).unwrap();
         transform.translation = other_transform.translation
     }
 }
@@ -74,6 +71,7 @@ pub fn movement(
 pub fn spawn_at_mouse(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
+    item_assets: Res<ItemAssets>,
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
 ) {
@@ -90,6 +88,8 @@ pub fn spawn_at_mouse(
     }) else {
         return;
     };
+
+    let stick = build_stick(&mut commands, &item_assets, Vec2::default());
 
     let legs = commands
         .spawn((
@@ -120,6 +120,7 @@ pub fn spawn_at_mouse(
                         Elbow::Down,
                     ),
                 ],
+                holding: None,
             },
             Locomotor {
                 desired_velocity: Vec2::new(0.0, 0.0),
@@ -180,6 +181,11 @@ pub fn spawn_at_mouse(
                         Elbow::Up,
                     ),
                 ],
+                holding: Some(Holding {
+                    holding: stick,
+                    offset: Vec2::new(0.0, -20.0),
+                    hands: 2,
+                }),
             },
             Locomotor {
                 desired_velocity: Vec2::new(0.0, 0.0),
@@ -189,12 +195,12 @@ pub fn spawn_at_mouse(
             Mass(0.5),
             Collider::circle(10.0),
             Transform::from_xyz(cursor.x, cursor.y, 0.0),
-            ConnectedBodies(vec![legs]),
+            ConnectedBodies(vec![Instance::from(legs)]),
         ))
         .id();
 
     commands.spawn((
-        ConnectedSprite(arms),
+        ConnectedSprite(Instance::from(arms)),
         PointTowards {
             what: legs,
             backwards: false,
@@ -206,7 +212,7 @@ pub fn spawn_at_mouse(
     ));
 
     commands.spawn((
-        ConnectedSprite(legs),
+        ConnectedSprite(Instance::from(legs)),
         PointTowards {
             what: arms,
             backwards: true,
@@ -217,7 +223,9 @@ pub fn spawn_at_mouse(
         Transform::from_scale(Vec3::splat(2.0)),
     ));
 
-    commands.entity(legs).insert(ConnectedBodies(vec![arms]));
+    commands
+        .entity(legs)
+        .insert(ConnectedBodies(vec![Instance::from(arms)]));
 
     commands.spawn(DistanceJoint::new(legs, arms).with_limits(28.0, 30.0));
 }
