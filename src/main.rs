@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use avian2d::prelude::*;
 use bevy::{
     camera::{RenderTarget, visibility::RenderLayers},
-    dev_tools::fps_overlay::FpsOverlayPlugin,
+    feathers::{FeathersPlugins, dark_theme::create_dark_theme, theme::UiTheme, tokens},
     image::ImageSampler,
     input::common_conditions::{input_just_pressed, input_pressed},
     prelude::*,
@@ -18,11 +18,10 @@ use bevy_ecs_tilemap::prelude::*;
 
 use crate::{
     body::{
-        BodyHead, ConnectedBodies, Elbow, Facing, Holding, Leg, Legged, Locomotor,
-        LocomotorOrchestrator, PreviousVelocity,
+        BodyHead, ConnectedBodies, Elbow, Facing, Leg, Legged, Locomotor, LocomotorOrchestrator,
+        PreviousVelocity,
     },
     environment::{AuditoryEventType, EventType, SenseEvent},
-    food::Food,
     instance::Instance,
     pathfind::Pathfinding,
     predator::Predator,
@@ -35,7 +34,6 @@ mod bullets;
 mod creature;
 mod editor;
 mod environment;
-mod food;
 mod health;
 mod instance;
 mod items;
@@ -46,6 +44,7 @@ mod player;
 mod predator;
 mod prerender;
 mod tilemap;
+mod ui;
 
 const PIXEL_SCALE: f32 = 1.5;
 
@@ -147,39 +146,6 @@ fn resize_render_target(
     }
 }
 
-fn create_foods(mut commands: Commands) {
-    Food::setup(
-        &mut commands,
-        20.0,
-        Color::srgb(0.0, 0.8, 0.3),
-        Vec2::new(250.0, 250.0),
-    );
-    Food::setup(
-        &mut commands,
-        20.0,
-        Color::srgb(0.0, 0.8, 0.3),
-        Vec2::new(-250.0, 250.0),
-    );
-    Food::setup(
-        &mut commands,
-        20.0,
-        Color::srgb(0.0, 0.8, 0.3),
-        Vec2::new(-250.0, -250.0),
-    );
-    Food::setup(
-        &mut commands,
-        20.0,
-        Color::srgb(0.0, 0.8, 0.3),
-        Vec2::new(500.0, 250.0),
-    );
-    Food::setup(
-        &mut commands,
-        20.0,
-        Color::srgb(0.0, 0.8, 0.3),
-        Vec2::new(-500.0, 100.0),
-    );
-}
-
 fn spawn_event(
     mut commands: Commands,
     window_query: Query<&Window>,
@@ -207,7 +173,7 @@ fn spawn_event(
         return;
     };
 
-    let (map_size, grid_size, tile_size, map_type, anchor, depth) = tilemap_query
+    let (map_size, grid_size, tile_size, map_type, anchor, _depth) = tilemap_query
         .iter()
         .find(|(_, _, _, _, _, depth)| depth.0 == 1)
         .unwrap();
@@ -360,6 +326,7 @@ fn spawn_enemy(
     commands.spawn(DistanceJoint::new(legs, arms).with_limits(0.0, 20.0));
 }
 
+#[allow(dead_code)]
 fn camera_movement(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -399,6 +366,7 @@ fn main() {
                 }),
                 ..default()
             }),
+        FeathersPlugins,
         Material2dPlugin::<lighting::HeightmapMaterial>::default(),
         TilemapPlugin,
         PhysicsPlugins::default(),
@@ -406,8 +374,9 @@ fn main() {
             .with_frequency(Duration::from_secs_f32(1.0))
             .with_transform(bevy_spatial::TransformMode::Transform)
             .with_spatial_ds(bevy_spatial::SpatialStructure::KDTree2),
-        FpsOverlayPlugin::default(),
+        // FpsOverlayPlugin::default(),
     ));
+
     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
     app.insert_resource(ClearColor(Color::srgb(0.5, 0.2, 0.2)));
     app.insert_gizmo_config(
@@ -417,14 +386,16 @@ fn main() {
             ..default()
         },
     );
+
+    let mut theme = create_dark_theme();
+    *theme.color.get_mut(&tokens::WINDOW_BG).unwrap() = Color::srgba(0.5, 0.5, 0.6, 0.05);
+    app.insert_resource(UiTheme(theme));
+
     app.add_systems(
         Startup,
         (
             setup,
-            // create_creatures,
-            // create_predators,
-            // create_foods,
-            // tilemap::setup,
+            ui::ui.spawn(),
             (
                 tilemap::load,
                 tilemap::bitmap,
@@ -437,6 +408,7 @@ fn main() {
             items::setup,
         ),
     );
+
     app.add_systems(
         Update,
         (
@@ -462,6 +434,7 @@ fn main() {
             ),
         ),
     );
+
     app.add_systems(
         FixedPostUpdate,
         (
@@ -485,13 +458,15 @@ fn main() {
             (plants::grow, plants::kill, plants::position, plants::width),
             (environment::process, environment::sound, environment::emit),
             (
-                tilemap::bitmap
-                    .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
+                tilemap::bitmap.run_if(
+                    input_pressed(MouseButton::Left).or_eager(input_pressed(MouseButton::Right)),
+                ),
                 tilemap::edit,
                 tilemap::update_current_tile,
                 tilemap::save.run_if(input_pressed(KeyCode::KeyK)),
             ),
         ),
     );
+
     app.run();
 }

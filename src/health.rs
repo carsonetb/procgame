@@ -6,6 +6,7 @@ pub struct Damages {
     /// Damage done if the object is traveling at 100 pixels per second.
     pub damage: f32,
     /// Modifies damage by speed_multi * ((speed - 100.0) / 100.0)
+    #[allow(dead_code)]
     pub speed_multi: f32,
     pub cooldown: Timer,
 }

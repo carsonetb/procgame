@@ -1,16 +1,16 @@
-use std::{collections::HashSet, time::Duration};
+#![allow(dead_code)]
+
+use std::collections::HashSet;
 
 use avian2d::spatial_query::{SpatialQuery, SpatialQueryFilter};
 use bevy::prelude::*;
-use bevy_ecs_tilemap::prelude::*;
 
 use crate::{
     body::{ConnectedBodies, Locomotor},
     brain::{Action, Belief, Brain, Sense, SmartEntity},
     environment::{AuditoryEventType, EventType, InternalEventType, SenseEvent, VisualEventType},
-    food::Food,
     pathfind::Pathfinding,
-    tilemap::{CurrentTile, PhysicsTilemap},
+    tilemap::CurrentTile,
 };
 
 #[derive(Component)]
@@ -22,45 +22,26 @@ pub struct Prey {
     walk_timer: Timer,
 }
 
-// pub fn setup(commands: &mut Commands, pos: Vec2) {
-//     commands.spawn((
-//         Prey {
-//             pos,
-//             hunger: 0.7,
-//             movement: Vec2::ZERO,
-//             eating: false,
-//             walk_timer: Timer::new(Duration::from_millis(400), TimerMode::Repeating),
-//         },
-//         Brain::new(vec![
-//             Box::new(RunState::new()),
-//             Box::new(HungerState::new()),
-//         ]),
-//         Sprite::from_color(Color::WHITE, Vec2::new(20.0, 20.0)),
-//         Transform::from_xyz(pos.x - 10.0, pos.y - 10.0, 0.0),
-//         Visibility::default(),
-//     ));
+// pub fn eat(
+//     mut commands: Commands,
+//     creature_query: Query<&mut Prey>,
+//     food_query: Query<(Entity, &Food)>,
+// ) {
+//     for mut creature in creature_query {
+//         if !creature.eating {
+//             continue;
+//         }
+
+//         for (food_entity, food) in food_query {
+//             if creature.pos.distance(food.pos) < 10.0 {
+//                 creature.hunger = 0.0;
+//                 commands.entity(food_entity).despawn();
+//             }
+//         }
+
+//         creature.eating = false;
+//     }
 // }
-
-pub fn eat(
-    mut commands: Commands,
-    creature_query: Query<&mut Prey>,
-    food_query: Query<(Entity, &Food)>,
-) {
-    for mut creature in creature_query {
-        if !creature.eating {
-            continue;
-        }
-
-        for (food_entity, food) in food_query {
-            if creature.pos.distance(food.pos) < 10.0 {
-                creature.hunger = 0.0;
-                commands.entity(food_entity).despawn();
-            }
-        }
-
-        creature.eating = false;
-    }
-}
 
 pub fn process(
     mut commands: Commands,
@@ -72,16 +53,8 @@ pub fn process(
         &mut Transform,
         &CurrentTile,
     )>,
-    physics_tilemap: Res<PhysicsTilemap>,
-    q_tilemap: Query<(
-        &TilemapSize,
-        &TilemapGridSize,
-        &TilemapTileSize,
-        &TilemapType,
-        &TilemapAnchor,
-    )>,
 ) {
-    for (mut creature, mut brain, mut transform, current) in creature_query {
+    for (mut creature, mut brain, mut _transform, current) in creature_query {
         creature.walk_timer.tick(time.delta());
 
         let Some(current) = current.tile else {
@@ -128,9 +101,6 @@ pub fn process(
                 _ => (),
             }
         }
-
-        let (map_size, grid_size, tile_size, map_type, anchor) =
-            q_tilemap.get(physics_tilemap.0).unwrap();
 
         creature.hunger += 0.1 * time.delta_secs();
         creature.hunger = creature.hunger.min(1.0);
@@ -203,7 +173,7 @@ pub fn translate(
 }
 
 impl SmartEntity<Action<CreatureAction>> for Prey {
-    fn apply(&mut self, commands: Vec<Action<CreatureAction>>, delta: f32) {
+    fn apply(&mut self, commands: Vec<Action<CreatureAction>>, _delta: f32) {
         let max = commands
             .iter()
             .max_by(|left, right| left.weight.abs().total_cmp(&right.weight.abs()))

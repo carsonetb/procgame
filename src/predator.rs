@@ -3,7 +3,6 @@ use std::{collections::HashSet, time::Duration};
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
-use rand::RngExt;
 
 use crate::{
     body::*,

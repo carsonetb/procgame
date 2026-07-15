@@ -26,6 +26,7 @@ pub fn setup(
 }
 
 /// Really fast moving rock
+#[allow(dead_code)]
 pub fn spawn_normal(commands: &mut Commands, data: &Res<NormalBulletData>, pos: Vec2, speed: Vec2) {
     commands.spawn((
         Bullet { speed },

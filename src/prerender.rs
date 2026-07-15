@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 
 use bevy::{
@@ -234,7 +236,7 @@ pub fn render_tile(
     mut layer_query: Query<&mut Layer>,
 ) {
     println!("Rendering tiles...");
-    for (tile, effects, elements) in tile_query {
+    for (tile, _effects, _elements) in tile_query {
         if let Some(atlas) = atlas_db.get(tile.atlas)
             && let Ok(mut layer) = layer_query.get_mut(tile.layer)
             && let Some(atlas_image) = images.get(&atlas.image)

@@ -20,7 +20,6 @@ pub struct LightingLayer {
     pub scale: f32,
     pub tile_size: f32,
     pub map_size: UVec2,
-    pub atlas_size: UVec2,
 }
 
 pub struct LightingData {
@@ -248,7 +247,6 @@ pub fn save_heightmap(
             scale,
             tile_size,
             map_size,
-            atlas_size: bitmap.dimensions * 20,
             plants: if depth == 1 {
                 q_plants.into_iter().cloned().collect::<Vec<_>>()
             } else {

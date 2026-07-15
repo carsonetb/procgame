@@ -11,6 +11,7 @@ pub enum AuditoryEventType {
     Scuttle,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub enum VisualEventType {
     Food { size: f32, color: Color },
@@ -30,6 +31,7 @@ pub enum EventType {
         typ: AuditoryEventType,
         affects: HashSet<TilePos>,
     },
+    #[allow(dead_code)]
     Visual(VisualEventType),
     Internal(InternalEventType),
 }
@@ -100,6 +102,7 @@ pub fn sound(
     }
 }
 
+#[allow(dead_code)]
 pub fn debug_sound(
     mut gizmos: Gizmos,
     q_senses: Query<&mut SenseEvent>,

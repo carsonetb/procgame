@@ -290,6 +290,7 @@ fn spawn_tile(
     }
 }
 
+#[allow(dead_code)]
 fn create_tilemap(
     commands: &mut Commands,
     map_size: TilemapSize,
@@ -350,6 +351,7 @@ fn create_tilemap(
     tilemap_entity
 }
 
+#[allow(dead_code)]
 pub fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut map = HashMap::new();
     map.insert(0b0011, vec![TileTextureIndex(0), TileTextureIndex(6)]);
@@ -562,25 +564,6 @@ pub fn bitmap(
                 }
             }
         }
-    }
-}
-
-pub fn depth(
-    camera_query: Query<&mut GlobalTransform, (With<Camera2d>, Without<BitMap>)>,
-    tilemap_query: Query<(&mut GlobalTransform, &MapDepth), With<BitMap>>,
-) {
-    let Ok(camera_transform) = camera_query.single() else {
-        return;
-    };
-    let camera_pos = camera_transform.translation().xy();
-    for (mut global_transform, &MapDepth(depth)) in tilemap_query {
-        *global_transform = Transform::from_xyz(
-            camera_pos.x * (-depth as f32 / 180.0),
-            camera_pos.y * (-depth as f32 / 180.0),
-            global_transform.translation().z,
-        )
-        .with_scale(global_transform.scale())
-        .into();
     }
 }
 
