@@ -42,8 +42,8 @@ pub fn setup(
 pub fn towards_mouse(
     q_window: Query<&Window>,
     q_camera: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
-    q_item: Query<(&Item, &mut HoldPoints)>,
-    q_player: Query<&Transform, (With<Player>, With<BodyHead>)>,
+    q_item: Query<(&Item, &mut HoldPoints, &mut Transform)>,
+    q_player: Query<&Transform, (With<Player>, With<BodyHead>, Without<Item>)>,
 ) {
     let Ok(window) = q_window.single() else {
         return;
@@ -64,10 +64,12 @@ pub fn towards_mouse(
     };
     let player_pos = player_transform.translation.xy();
 
-    for (item, mut holds) in q_item {
+    for (item, mut holds, mut transform) in q_item {
         if !item.held {
             continue;
         }
+
+        transform.rotation = Quat::from_rotation_z((cursor - player_pos).to_angle());
 
         let mut primary_target = holds.base_primary + (cursor - player_pos) / 10.0;
         if primary_target.length() > 30.0 {
@@ -91,10 +93,10 @@ pub fn update_interactions(mut commands: Commands, q_items: Query<(Entity, &Item
         if item.held
             && let RigidBody::Dynamic = body
         {
-            commands.entity(entity).insert(RigidBody::Static);
+            commands.entity(entity).insert(RigidBody::Kinematic);
         }
         if !item.held
-            && let RigidBody::Static = body
+            && let RigidBody::Kinematic = body
         {
             commands.entity(entity).insert(RigidBody::Dynamic);
         }

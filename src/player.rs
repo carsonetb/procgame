@@ -7,6 +7,8 @@ use crate::{
     GameLayer, MainCamera, PIXEL_SCALE, body::*, environment::*, instance::Instance, items::*,
 };
 
+const PICKUP_DIST: f32 = 100.0;
+
 #[derive(Component, Default, Debug, Clone, Copy)]
 pub struct Player;
 
@@ -71,14 +73,35 @@ pub fn movement(input: Res<ButtonInput<KeyCode>>, query: Query<&mut Locomotor, W
 }
 
 pub fn pickup_drop(
-    q_player: Query<&mut Legged, (With<Player>, With<BodyHead>)>,
-    mut q_item: Query<&mut Item>,
+    q_player: Query<(&mut Legged, &Transform), (With<Player>, With<BodyHead>)>,
+    mut q_item: Query<(Entity, &mut Item, &mut LinearVelocity, &Transform)>,
 ) {
-    for mut legged in q_player {
+    for (mut legged, player_transform) in q_player {
         if let Some(holding) = &legged.holding {
-            let mut item = q_item.get_mut(holding.holding.entity).unwrap();
+            let (_, mut item, mut velocity, transform) =
+                q_item.get_mut(holding.holding.entity).unwrap();
             item.held = false;
+            velocity.0 = Vec2::from_angle(transform.rotation.to_euler(EulerRot::XYZ).2) * 800.0;
             legged.holding = None;
+            continue;
+        }
+
+        for (entity, mut item, _, item_transform) in &mut q_item {
+            if dbg!(
+                player_transform
+                    .translation
+                    .xy()
+                    .distance(item_transform.translation.xy())
+            ) < PICKUP_DIST
+            {
+                item.held = true;
+                legged.holding = Some(Holding {
+                    holding: Instance::from(entity),
+                    offset: Vec2::new(0.0, -20.0),
+                    hands: 2,
+                });
+                break;
+            }
         }
     }
 }
