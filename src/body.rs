@@ -2,6 +2,7 @@ use avian2d::prelude::*;
 use bevy::{math::ops::atan2, prelude::*};
 
 use crate::{
+    GameLayer,
     instance::Instance,
     items::{HoldPoints, Item},
 };
@@ -23,9 +24,6 @@ pub struct BodyLegs;
 
 #[derive(Component, Default, Debug, Clone, Copy)]
 pub struct PreviousVelocity(pub Vec2);
-
-#[derive(Component, Default, Debug, Clone, Copy)]
-pub struct UserControlled;
 
 impl Elbow {
     fn with_facing(&self, facing: Facing) -> Self {
@@ -160,7 +158,9 @@ pub fn stand(
                     Dir2::from_xy(direction.x, direction.y).unwrap(),
                     leg.length,
                     true,
-                    &SpatialQueryFilter::default().with_excluded_entities(excluded.clone()),
+                    &SpatialQueryFilter::default()
+                        .with_excluded_entities(excluded.clone())
+                        .with_mask([GameLayer::Environment, GameLayer::Player]),
                 ) {
                     if hit_data.distance < lowest_distance {
                         lowest_distance = hit_data.distance;
@@ -238,20 +238,6 @@ pub fn locomote(mut query: Query<(Forces, &Locomotor, &mut Legged), With<RigidBo
     }
 }
 
-pub fn hold(
-    q_legged: Query<(&Legged, &Transform), Without<Item>>,
-    mut q_item: Query<&mut Transform, With<Item>>,
-) {
-    for (legged, transform) in q_legged {
-        let Some(holding) = &legged.holding else {
-            continue;
-        };
-
-        let mut item_transform = q_item.get_mut(holding.holding.entity).unwrap();
-        item_transform.translation = (transform.translation.xy() + holding.offset).extend(0.0);
-    }
-}
-
 pub fn jump(query: Query<(Forces, &Locomotor, &Legged), With<BodyLegs>>) {
     for (mut forces, locomotor, legged) in query {
         if locomotor.desired_velocity.y > 0.0 && forces.linear_velocity().y > 0.0 {
@@ -281,18 +267,21 @@ pub fn jump(query: Query<(Forces, &Locomotor, &Legged), With<BodyLegs>>) {
 }
 
 pub fn animate(
-    q_legged: Query<(Forces, &mut Legged, &Transform), With<RigidBody>>,
-    q_item: Query<&HoldPoints, With<Item>>,
+    q_legged: Query<(Forces, &mut Legged, &Transform), (With<RigidBody>, Without<Item>)>,
+    mut q_item: Query<(&HoldPoints, &mut Transform), With<Item>>,
 ) {
     for (forces, mut legged, transform) in q_legged {
         let origin = transform.translation.xy();
 
         if let Some(holding) = legged.holding.clone() {
-            let item = q_item.get(holding.holding.entity).unwrap();
-            legged.legs[0].position = origin + holding.offset + item.primary;
+            let (item, mut transform) = q_item.get_mut(holding.holding.entity).unwrap();
+            let primary_pos = origin + holding.offset + item.primary;
+            legged.legs[0].position = primary_pos;
             if let Some(secondary) = item.secondary {
                 legged.legs[1].position = origin + holding.offset + secondary;
             }
+            transform.translation = (origin + holding.offset + (item.primary - item.base_primary))
+                .extend(transform.translation.z);
             continue;
         }
 

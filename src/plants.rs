@@ -188,8 +188,10 @@ pub fn kill(
             let Some(entity) = entity else {
                 continue;
             };
-            if (branch.pos + direction * branch.length).distance(pos) < params.kill {
-                commands.entity(entity).despawn();
+            if (branch.pos + direction * branch.length).distance(pos) < params.kill
+                && let Ok(mut entity) = commands.get_entity(entity)
+            {
+                entity.despawn();
             }
         }
     }

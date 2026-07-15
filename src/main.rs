@@ -55,6 +55,15 @@ struct PixelRenderTarget(Handle<Image>);
 #[derive(Component)]
 struct MainCamera;
 
+#[derive(Debug, Default, Clone, Copy, PhysicsLayer)]
+pub enum GameLayer {
+    #[default]
+    Environment,
+    Player,
+    Entity,
+    Items,
+}
+
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, window: Query<&Window>) {
     let Ok(window) = window.single() else {
         return;
@@ -381,14 +390,15 @@ fn main() {
     // });
     // app.add_plugins(steamworks::SteamworksPlugin::init_app(480).unwrap());
     app.add_plugins((
-        DefaultPlugins.set(ImagePlugin::default_nearest()),
-        // .set(WindowPlugin {
-        //     primary_window: Some(Window {
-        //         present_mode: bevy::window::PresentMode::AutoNoVsync,
-        //         ..default()
-        //     }),
-        //     ..default()
-        // }),
+        DefaultPlugins
+            .set(ImagePlugin::default_nearest())
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    present_mode: bevy::window::PresentMode::AutoNoVsync,
+                    ..default()
+                }),
+                ..default()
+            }),
         Material2dPlugin::<lighting::HeightmapMaterial>::default(),
         TilemapPlugin,
         PhysicsPlugins::default(),
@@ -431,33 +441,34 @@ fn main() {
         Update,
         (
             resize_render_target,
-            player::spawn_at_mouse.run_if(input_just_pressed(MouseButton::Middle)),
-            spawn_enemy.run_if(input_just_pressed(KeyCode::KeyE)),
+            spawn_enemy.run_if(input_just_pressed(KeyCode::KeyX)),
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
             // tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))), // TODO: This lags, disable it later
-            lighting::trigger_heightmap_work.run_if(input_just_pressed(KeyCode::KeyH)),
-            lighting::poll_heightmap_work,
+            (
+                player::spawn_at_mouse.run_if(input_just_pressed(MouseButton::Middle)),
+                player::pickup_drop.run_if(input_just_pressed(KeyCode::KeyE)),
+            ),
             body::render,
-            plants::render,
-            plants::debug_plants.run_if(input_pressed(KeyCode::KeyT)),
-            plants::debug_attractors.run_if(input_pressed(KeyCode::ShiftLeft)),
-            plants::spawn_attractor.run_if(input_just_pressed(KeyCode::KeyQ)),
-            plants::spawn_root.run_if(input_just_pressed(KeyCode::KeyR)),
+            (
+                plants::render,
+                plants::debug_plants.run_if(input_pressed(KeyCode::KeyT)),
+                plants::debug_attractors.run_if(input_pressed(KeyCode::ShiftLeft)),
+                plants::spawn_attractor.run_if(input_just_pressed(KeyCode::KeyQ)),
+                plants::spawn_root.run_if(input_just_pressed(KeyCode::KeyR)),
+            ),
+            (
+                lighting::trigger_heightmap_work.run_if(input_just_pressed(KeyCode::KeyH)),
+                lighting::poll_heightmap_work,
+            ),
         ),
     );
     app.add_systems(
         FixedPostUpdate,
         (
-            (environment::process, environment::sound, environment::emit),
-            (plants::grow, plants::kill, plants::position, plants::width),
             (
-                tilemap::bitmap
-                    .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
-                tilemap::edit,
-                tilemap::update_current_tile,
-                tilemap::save.run_if(input_pressed(KeyCode::KeyK)),
+                player::movement,
+                (player::update_sprites, player::point_sprites).chain(),
             ),
-            pathfind::pathfind,
             (
                 body::stand,
                 body::locomote,
@@ -465,13 +476,21 @@ fn main() {
                 body::animate,
                 body::balance,
                 body::orchestrate,
-                body::hold,
             ),
+            (items::towards_mouse, items::update_interactions),
             (predator::process, predator::attack, predator::translate),
-            player::movement,
-            (player::update_sprites, player::point_sprites).chain(),
+            pathfind::pathfind,
             (bullets::gravity, bullets::travel),
             (health::damage, health::cooldown),
+            (plants::grow, plants::kill, plants::position, plants::width),
+            (environment::process, environment::sound, environment::emit),
+            (
+                tilemap::bitmap
+                    .run_if(input_pressed(MouseButton::Left).or(input_pressed(MouseButton::Right))),
+                tilemap::edit,
+                tilemap::update_current_tile,
+                tilemap::save.run_if(input_pressed(KeyCode::KeyK)),
+            ),
         ),
     );
     app.run();

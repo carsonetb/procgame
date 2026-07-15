@@ -3,7 +3,12 @@ use std::{collections::HashSet, f32::consts::PI};
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
-use crate::{MainCamera, PIXEL_SCALE, body::*, environment::*, instance::Instance, items::*};
+use crate::{
+    GameLayer, MainCamera, PIXEL_SCALE, body::*, environment::*, instance::Instance, items::*,
+};
+
+#[derive(Component, Default, Debug, Clone, Copy)]
+pub struct Player;
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ConnectedSprite(pub Instance<Transform>);
@@ -45,10 +50,7 @@ pub fn point_sprites(
     }
 }
 
-pub fn movement(
-    input: Res<ButtonInput<KeyCode>>,
-    query: Query<&mut Locomotor, With<UserControlled>>,
-) {
+pub fn movement(input: Res<ButtonInput<KeyCode>>, query: Query<&mut Locomotor, With<Player>>) {
     let mut movement = Vec2::ZERO;
     if input.pressed(KeyCode::KeyA) {
         movement += Vec2::new(-100.0, 0.0);
@@ -65,6 +67,19 @@ pub fn movement(
     }
     for mut locomotor in query {
         locomotor.desired_velocity = movement;
+    }
+}
+
+pub fn pickup_drop(
+    q_player: Query<&mut Legged, (With<Player>, With<BodyHead>)>,
+    mut q_item: Query<&mut Item>,
+) {
+    for mut legged in q_player {
+        if let Some(holding) = &legged.holding {
+            let mut item = q_item.get_mut(holding.holding.entity).unwrap();
+            item.held = false;
+            legged.holding = None;
+        }
     }
 }
 
@@ -93,7 +108,7 @@ pub fn spawn_at_mouse(
 
     let legs = commands
         .spawn((
-            UserControlled,
+            Player,
             BodyLegs,
             PreviousVelocity(Vec2::ZERO),
             Legged {
@@ -138,6 +153,10 @@ pub fn spawn_at_mouse(
                 interval: Timer::from_seconds(0.5, TimerMode::Repeating),
             },
             RigidBody::Dynamic,
+            CollisionLayers::new(
+                [GameLayer::Player, GameLayer::Entity],
+                [GameLayer::Environment],
+            ),
             Restitution::new(0.1),
             Mass(1.0),
             Collider::circle(10.0),
@@ -147,7 +166,7 @@ pub fn spawn_at_mouse(
 
     let arms = commands
         .spawn((
-            UserControlled,
+            Player,
             BodyHead,
             Legged {
                 facing: Facing::Left,
@@ -191,6 +210,10 @@ pub fn spawn_at_mouse(
                 desired_velocity: Vec2::new(0.0, 0.0),
             },
             RigidBody::Dynamic,
+            CollisionLayers::new(
+                [GameLayer::Player, GameLayer::Entity],
+                [GameLayer::Environment],
+            ),
             Restitution::new(0.1),
             Mass(0.5),
             Collider::circle(10.0),
