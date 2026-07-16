@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, env, time::Duration};
 
 use avian2d::prelude::*;
 use bevy::{
@@ -23,6 +23,7 @@ use crate::{
     },
     environment::{AuditoryEventType, EventType, SenseEvent},
     instance::Instance,
+    multiplayer::LocalNetworkingPlugin,
     pathfind::Pathfinding,
     predator::Predator,
     tilemap::{CurrentTile, MapDepth},
@@ -38,6 +39,7 @@ mod health;
 mod instance;
 mod items;
 mod lighting;
+mod multiplayer;
 mod pathfind;
 mod plants;
 mod player;
@@ -351,6 +353,10 @@ fn camera_movement(
 }
 
 fn main() {
+    let args = env::args().collect::<Vec<String>>();
+    let port = args.get(1).map(|s| s.clone()).unwrap_or("3000".into());
+    let target = args.get(2).map(|s| s.clone());
+
     let mut app = App::new();
     // app.add_plugins(EmbeddedAssetPlugin {
     //     mode: bevy_embedded_assets::PluginMode::ReplaceDefault,
@@ -366,6 +372,7 @@ fn main() {
                 }),
                 ..default()
             }),
+        multiplayer::LocalNetworkingPlugin::<multiplayer::Message>::new(port, target),
         FeathersPlugins,
         Material2dPlugin::<lighting::HeightmapMaterial>::default(),
         TilemapPlugin,
@@ -390,6 +397,8 @@ fn main() {
     let mut theme = create_dark_theme();
     *theme.color.get_mut(&tokens::WINDOW_BG).unwrap() = Color::srgba(0.5, 0.5, 0.6, 0.05);
     app.insert_resource(UiTheme(theme));
+
+    app.add_message::<multiplayer::Message>();
 
     app.add_systems(
         Startup,
