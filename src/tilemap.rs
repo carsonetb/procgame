@@ -578,7 +578,7 @@ pub fn colordepth(mut q_tiles: Query<&mut TileColor>, q_tilemap: Query<(&TileSto
 
             let mut color = q_tiles.get_mut(*entity).unwrap();
             let amount = 1.0 - depth / 50.0;
-            *color = TileColor(Color::srgb(amount, amount * 0.2, amount * 0.2));
+            *color = TileColor(Color::srgb(amount * 0.8, amount * 0.8, amount * 1.2));
         }
     }
 }

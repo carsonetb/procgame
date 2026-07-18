@@ -12,8 +12,7 @@ pub struct Item {
 
 #[derive(Component, Default, Debug, Clone)]
 pub struct HoldPoints {
-    pub base_primary: Vec2,
-    pub base_secondary: Option<Vec2>,
+    pub offset: Vec2,
     pub primary: Vec2,
     pub secondary: Option<Vec2>,
 }
@@ -59,7 +58,7 @@ pub fn towards_mouse(
         return;
     };
 
-    let Ok(player_transform) = q_player.single() else {
+    let Some(player_transform) = q_player.iter().next() else {
         return;
     };
     let player_pos = player_transform.translation.xy();
@@ -70,21 +69,14 @@ pub fn towards_mouse(
         }
 
         transform.rotation = Quat::from_rotation_z((cursor - player_pos).to_angle());
+        let cursor_direction = (cursor + Vec2::new(0.01, 0.01) - player_pos).normalize();
 
-        let mut primary_target = holds.base_primary + (cursor - player_pos) / 10.0;
-        if primary_target.length() > 30.0 {
-            primary_target = primary_target.normalize() * 30.0;
+        let multiplier = ((cursor - player_pos) / 20.0).length().min(30.0);
+        holds.primary = cursor_direction * (4.0 + multiplier);
+        if let Some(secondary) = &mut holds.secondary {
+            *secondary = cursor_direction * (multiplier - 9.0);
         }
-        holds.primary = holds.primary.lerp(primary_target, 0.1);
-        if let Some(base_secondary) = holds.base_secondary
-            && let Some(secondary) = &mut holds.secondary
-        {
-            let mut secondary_target = base_secondary + (cursor - player_pos) / 10.0;
-            if secondary_target.length() > 30.0 {
-                secondary_target = secondary_target.normalize() * 30.0;
-            }
-            *secondary = secondary.lerp(secondary_target, 0.1);
-        }
+        holds.offset = cursor_direction * multiplier;
     }
 }
 
@@ -108,8 +100,7 @@ pub fn build_stick(commands: &mut Commands, assets: &Res<ItemAssets>, pos: Vec2)
         .spawn((
             Item { held: true },
             HoldPoints {
-                base_primary: Vec2::new(-5.0, 0.0),
-                base_secondary: Some(Vec2::new(5.0, 0.0)),
+                offset: Vec2::default(),
                 primary: Vec2::new(-5.0, 0.0),
                 secondary: Some(Vec2::new(5.0, 0.0)),
             },

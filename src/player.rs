@@ -1,16 +1,37 @@
-use std::{collections::HashSet, f32::consts::PI};
+use std::{
+    collections::{HashMap, HashSet},
+    f32::consts::PI,
+};
 
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
 use crate::{
-    GameLayer, MainCamera, PIXEL_SCALE, body::*, environment::*, instance::Instance, items::*,
+    GameLayer, MainCamera, PIXEL_SCALE,
+    body::*,
+    environment::*,
+    input::{Controllers, get_action},
+    instance::Instance,
+    items::*,
 };
 
 const PICKUP_DIST: f32 = 100.0;
 
+#[derive(Resource, Debug, Default, Deref, DerefMut, Clone)]
+pub struct PlayerIndices(HashMap<u32, Vec<Entity>>);
+
+impl PlayerIndices {
+    fn get_index(&self) -> u32 {
+        let mut i = 0;
+        while self.contains_key(&i) {
+            i += 1;
+        }
+        i
+    }
+}
+
 #[derive(Component, Default, Debug, Clone, Copy)]
-pub struct Player;
+pub struct Player(u32);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ConnectedSprite(pub Instance<Transform>);
@@ -21,6 +42,68 @@ pub struct PointTowards {
     pub backwards: bool,
     pub offset: f32,
     pub mix: Option<(Vec2, f32)>,
+}
+
+pub fn setup(mut commands: Commands) {
+    commands.insert_resource(PlayerIndices::default());
+}
+
+pub fn movement(
+    input: Res<ButtonInput<KeyCode>>,
+    controllers: Res<Controllers>,
+    q_gamepads: Query<&Gamepad>,
+    query: Query<(&mut Locomotor, &Player)>,
+) {
+    for (mut locomotor, &Player(index)) in query {
+        let action = get_action(&input, &controllers, &q_gamepads, index as usize);
+        let mut movement = Vec2::ZERO;
+        movement.x += action.horizontal * 100.0;
+        movement.y += action.vertical * 100.0;
+
+        locomotor.desired_velocity = movement;
+    }
+}
+
+pub fn pickup_drop(
+    input: Res<ButtonInput<KeyCode>>,
+    controllers: Res<Controllers>,
+    q_gamepads: Query<&Gamepad>,
+    q_player: Query<(&mut Legged, &Transform, &Player), With<BodyHead>>,
+    mut q_item: Query<(Entity, &mut Item, &mut LinearVelocity, &Transform)>,
+) {
+    for (mut legged, player_transform, &Player(index)) in q_player {
+        let action = get_action(&input, &controllers, &q_gamepads, index as usize);
+
+        if !action.grab_drop {
+            continue;
+        }
+
+        if let Some(holding) = &legged.holding {
+            let (_, mut item, mut velocity, transform) =
+                q_item.get_mut(holding.holding.entity).unwrap();
+            item.held = false;
+            velocity.0 = Vec2::from_angle(transform.rotation.to_euler(EulerRot::XYZ).2) * 800.0;
+            legged.holding = None;
+            continue;
+        }
+
+        for (entity, mut item, _, item_transform) in &mut q_item {
+            if player_transform
+                .translation
+                .xy()
+                .distance(item_transform.translation.xy())
+                < PICKUP_DIST
+            {
+                item.held = true;
+                legged.holding = Some(Holding {
+                    holding: Instance::from(entity),
+                    offset: Vec2::new(0.0, -20.0),
+                    hands: 2,
+                });
+                break;
+            }
+        }
+    }
 }
 
 pub fn update_sprites(
@@ -52,62 +135,9 @@ pub fn point_sprites(
     }
 }
 
-pub fn movement(input: Res<ButtonInput<KeyCode>>, query: Query<&mut Locomotor, With<Player>>) {
-    let mut movement = Vec2::ZERO;
-    if input.pressed(KeyCode::KeyA) {
-        movement += Vec2::new(-100.0, 0.0);
-    }
-    if input.pressed(KeyCode::KeyD) {
-        movement += Vec2::new(100.0, 0.0);
-    }
-    if input.pressed(KeyCode::KeyS) {
-        movement += Vec2::new(0.0, -70.0);
-    }
-    if input.pressed(KeyCode::KeyW) {
-        movement.y = 0.0;
-        movement += Vec2::new(0.0, 100.0);
-    }
-    for mut locomotor in query {
-        locomotor.desired_velocity = movement;
-    }
-}
-
-pub fn pickup_drop(
-    q_player: Query<(&mut Legged, &Transform), (With<Player>, With<BodyHead>)>,
-    mut q_item: Query<(Entity, &mut Item, &mut LinearVelocity, &Transform)>,
-) {
-    for (mut legged, player_transform) in q_player {
-        if let Some(holding) = &legged.holding {
-            let (_, mut item, mut velocity, transform) =
-                q_item.get_mut(holding.holding.entity).unwrap();
-            item.held = false;
-            velocity.0 = Vec2::from_angle(transform.rotation.to_euler(EulerRot::XYZ).2) * 800.0;
-            legged.holding = None;
-            continue;
-        }
-
-        for (entity, mut item, _, item_transform) in &mut q_item {
-            if dbg!(
-                player_transform
-                    .translation
-                    .xy()
-                    .distance(item_transform.translation.xy())
-            ) < PICKUP_DIST
-            {
-                item.held = true;
-                legged.holding = Some(Holding {
-                    holding: Instance::from(entity),
-                    offset: Vec2::new(0.0, -20.0),
-                    hands: 2,
-                });
-                break;
-            }
-        }
-    }
-}
-
 pub fn spawn_at_mouse(
     mut commands: Commands,
+    mut player_indices: ResMut<PlayerIndices>,
     asset_server: Res<AssetServer>,
     item_assets: Res<ItemAssets>,
     window_query: Query<&Window>,
@@ -129,9 +159,11 @@ pub fn spawn_at_mouse(
 
     let stick = build_stick(&mut commands, &item_assets, Vec2::default());
 
+    let index = player_indices.get_index();
+
     let legs = commands
         .spawn((
-            Player,
+            Player(index),
             BodyLegs,
             PreviousVelocity(Vec2::ZERO),
             Legged {
@@ -189,7 +221,7 @@ pub fn spawn_at_mouse(
 
     let arms = commands
         .spawn((
-            Player,
+            Player(index),
             BodyHead,
             Legged {
                 facing: Facing::Left,
@@ -244,6 +276,10 @@ pub fn spawn_at_mouse(
             ConnectedBodies(vec![Instance::from(legs)]),
         ))
         .id();
+
+    player_indices.insert(index, vec![arms, legs]);
+
+    info!("Spawn player with index {index}");
 
     commands.spawn((
         ConnectedSprite(Instance::from(arms)),

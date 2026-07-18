@@ -1,7 +1,6 @@
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
+//! Setting this aside for a little bit to do couch multiplayer instead.
+
+use std::collections::HashMap;
 
 use bevy::prelude::*;
 
@@ -10,25 +9,17 @@ use serde::{Deserialize, Serialize};
 
 mod local;
 
-#[derive(Component, Serialize, Deserialize, Debug, Clone)]
+#[derive(Component, Debug, Clone, Copy)]
+pub struct NetworkedEntity {
+    pub authority: bool,
+    pub id: u64,
+}
+
+#[derive(Component, Serialize, Deserialize, Debug, Deref, Clone)]
 pub struct Synchronized<T> {
     id: u64,
-    authority: bool,
+    #[deref]
     inner: T,
-}
-
-impl<T> Deref for Synchronized<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T> DerefMut for Synchronized<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
 }
 
 #[derive(Resource, Debug, Default, Clone)]
@@ -45,7 +36,9 @@ macro_rules! define_messages {
             )*
         }
 
-        #[allow(non_snake_case)]
+        #[derive(Message, Deref, Debug, Clone)]
+        pub struct SendMessage(Message);
+
         pub fn process_messages(
             mut messages: MessageReader<Message>,
             translator: Res<Translator>,
@@ -63,13 +56,18 @@ macro_rules! define_messages {
                             let remote = remote.clone();
 
                             commands.queue(move |world: &mut World| {
-                                let Some(mut local) = world.get_mut::<Synchronized<$comp>>(local_entity) else {
-                                    warn!("Entity lacks component: {}", stringify!($comp));
+                                let Some(network_info) = world.get::<NetworkedEntity>(local_entity).cloned() else {
+                                    warn!("Entity lacks Authority component.");
                                     return;
                                 };
 
-                                if local.authority || !remote.authority {
-                                    error!("Authority mismatch for {}.", stringify!($comp));
+                                let Some(mut local) = world.get_mut::<Synchronized<$comp>>(local_entity) else {
+                                    warn!("Entity lacks component {}.", stringify!($comp));
+                                    return;
+                                };
+
+                                if network_info.authority {
+                                    error!("I am authority but am receiving updates for {}.", stringify!($comp));
                                     return;
                                 }
 
@@ -79,6 +77,29 @@ macro_rules! define_messages {
                     )*
                 }
             }
+        }
+
+        pub fn send_messages(
+            world: &mut World
+        ) {
+            $(
+                let mut query = world.query::<(&Synchronized<$comp>, &NetworkedEntity)>();
+                let iter = query.iter_mut(world);
+                let mut messages = Vec::with_capacity(iter.len());
+                for (local, info) in iter {
+                    if !info.authority {
+                        continue;
+                    }
+                    info!("Sending a message from {}", stringify!($comp));
+                    let mut local = local.clone();
+                    local.id = info.id;
+                    messages.push(SendMessage(Message::$comp(local)))
+                }
+
+                for message in messages {
+                    world.write_message(message);
+                }
+            )*
         }
     };
 }

@@ -36,6 +36,7 @@ mod creature;
 mod editor;
 mod environment;
 mod health;
+mod input;
 mod instance;
 mod items;
 mod lighting;
@@ -385,7 +386,7 @@ fn main() {
     ));
 
     app.insert_resource(Gravity(Vec2::NEG_Y * 980.0));
-    app.insert_resource(ClearColor(Color::srgb(0.5, 0.2, 0.2)));
+    app.insert_resource(ClearColor(Color::srgb(0.5, 0.5, 0.8)));
     app.insert_gizmo_config(
         DefaultGizmoConfigGroup,
         GizmoConfig {
@@ -415,6 +416,8 @@ fn main() {
             plants::setup,
             bullets::setup,
             items::setup,
+            input::setup,
+            player::setup,
         ),
     );
 
@@ -427,7 +430,7 @@ fn main() {
             // tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))), // TODO: This lags, disable it later
             (
                 player::spawn_at_mouse.run_if(input_just_pressed(MouseButton::Middle)),
-                player::pickup_drop.run_if(input_just_pressed(KeyCode::KeyE)),
+                player::pickup_drop,
             ),
             body::render,
             (
@@ -441,6 +444,7 @@ fn main() {
                 lighting::trigger_heightmap_work.run_if(input_just_pressed(KeyCode::KeyH)),
                 lighting::poll_heightmap_work,
             ),
+            input::track_controllers,
         ),
     );
 

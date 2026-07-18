@@ -280,8 +280,8 @@ pub fn animate(
             if let Some(secondary) = item.secondary {
                 legged.legs[1].position = origin + holding.offset + secondary;
             }
-            transform.translation = (origin + holding.offset + (item.primary - item.base_primary))
-                .extend(transform.translation.z);
+            transform.translation =
+                (origin + holding.offset + item.offset).extend(transform.translation.z);
             continue;
         }
 
@@ -308,7 +308,7 @@ pub fn animate(
                 if leg.stepping
                     && let Some(target) = leg.move_target
                 {
-                    leg.position = leg.position.lerp(target, 0.2);
+                    leg.position = leg.position.lerp(target, 0.17);
 
                     if leg.position.distance(target) < 5.0 {
                         leg.stepping = false;
