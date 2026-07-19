@@ -15,7 +15,7 @@ use crate::{
     items::*,
 };
 
-const PICKUP_DIST: f32 = 100.0;
+const PICKUP_OFFSET: Vec2 = Vec2::new(35.0, 50.0);
 
 #[derive(Resource, Debug, Default, Deref, DerefMut, Clone)]
 pub struct PlayerIndices(HashMap<u32, Vec<Entity>>);
@@ -31,7 +31,7 @@ impl PlayerIndices {
 }
 
 #[derive(Component, Default, Debug, Clone, Copy)]
-pub struct Player(u32);
+pub struct Player(pub u32);
 
 #[derive(Component, Debug, Clone, Copy)]
 pub struct ConnectedSprite(pub Instance<Transform>);
@@ -88,12 +88,8 @@ pub fn pickup_drop(
         }
 
         for (entity, mut item, _, item_transform) in &mut q_item {
-            if player_transform
-                .translation
-                .xy()
-                .distance(item_transform.translation.xy())
-                < PICKUP_DIST
-            {
+            let offset = item_transform.translation.xy() - player_transform.translation.xy();
+            if offset.x.abs() < PICKUP_OFFSET.x && offset.y.abs() < PICKUP_OFFSET.y {
                 item.held = true;
                 legged.holding = Some(Holding {
                     holding: Instance::from(entity),

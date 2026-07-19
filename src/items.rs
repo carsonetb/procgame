@@ -80,11 +80,15 @@ pub fn towards_mouse(
     }
 }
 
-pub fn update_interactions(mut commands: Commands, q_items: Query<(Entity, &Item, &RigidBody)>) {
-    for (entity, item, body) in q_items {
+pub fn update_interactions(
+    mut commands: Commands,
+    q_items: Query<(Entity, &Item, &RigidBody, &mut LinearVelocity)>,
+) {
+    for (entity, item, body, mut velocity) in q_items {
         if item.held
             && let RigidBody::Dynamic = body
         {
+            *velocity = LinearVelocity::default();
             commands.entity(entity).insert(RigidBody::Kinematic);
         }
         if !item.held
@@ -107,7 +111,7 @@ pub fn build_stick(commands: &mut Commands, assets: &Res<ItemAssets>, pos: Vec2)
             RigidBody::Dynamic,
             Collider::rectangle(1.0, 1.0),
             CollisionLayers::new(GameLayer::Items, [GameLayer::Environment]),
-            Transform::from_xyz(pos.x, pos.y, 200.0).with_scale(Vec3::new(30.0, 3.0, 1.0)),
+            Transform::from_xyz(pos.x, pos.y, 2.0).with_scale(Vec3::new(30.0, 3.0, 1.0)),
             Mesh2d(assets.stick_mesh.clone()),
             MeshMaterial2d(assets.stick_material.clone()),
             Visibility::default(),

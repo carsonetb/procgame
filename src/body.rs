@@ -5,6 +5,7 @@ use crate::{
     GameLayer,
     instance::Instance,
     items::{HoldPoints, Item},
+    pathfind::Pathfinding,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -122,7 +123,7 @@ pub struct Locomotor {
 }
 
 #[derive(Component, Debug, Clone)]
-pub struct LocomotorOrchestrator(pub Vec<Entity>);
+pub struct PathfindOrchestrator(pub Vec<Entity>);
 
 pub fn stand(
     spatial_query: SpatialQuery,
@@ -364,13 +365,14 @@ pub fn render(mut gizmos: Gizmos, query: Query<(&mut Legged, &Transform), With<R
 }
 
 pub fn orchestrate(
-    orchestrators: Query<(&Locomotor, &LocomotorOrchestrator)>,
-    mut locomotors: Query<&mut Locomotor, Without<LocomotorOrchestrator>>,
+    orchestrators: Query<(&Pathfinding, &PathfindOrchestrator)>,
+    mut pathfinders: Query<&mut Pathfinding, Without<PathfindOrchestrator>>,
 ) {
     for (master, orch) in orchestrators {
         for entity in &orch.0 {
-            let mut locomotor = locomotors.get_mut(*entity).unwrap();
-            locomotor.desired_velocity = master.desired_velocity;
+            let mut pathfinding = pathfinders.get_mut(*entity).unwrap();
+            pathfinding.to = master.to;
+            pathfinding.urgency = master.urgency;
         }
     }
 }

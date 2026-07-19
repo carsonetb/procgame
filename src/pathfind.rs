@@ -11,6 +11,7 @@ pub struct Pathfinding {
     pub to: Vec2,
     pub steps: i32,
     pub direction: Option<Vec2>,
+    pub urgency: f32,
     pub tilemap: Instance<TileStorage>,
 }
 
@@ -21,6 +22,7 @@ impl Pathfinding {
             to,
             steps,
             direction: None,
+            urgency: 0.0,
             tilemap,
         }
     }
@@ -35,7 +37,7 @@ fn viable(storage: &TileStorage, pos: TilePos) -> bool {
 }
 
 pub fn pathfind(
-    // mut gizmos: Gizmos,
+    mut gizmos: Gizmos,
     q_pathfinding: Query<&mut Pathfinding>,
     q_tilemap: Query<(
         &mut TileStorage,
@@ -94,7 +96,7 @@ pub fn pathfind(
         let mut closest_distance = f32::INFINITY;
         for pos in explored {
             let pos = pos.center_in_world(map_size, grid_size, tile_size, map_type, anchor) * 2.0;
-            // gizmos.circle_2d(pos, 5.0, Color::srgb(0.0, 0.0, 1.0));
+            gizmos.circle_2d(pos, 5.0, Color::srgb(0.0, 0.0, 1.0));
             let distance = pos.distance(pathfinding.to);
             if distance < closest_distance {
                 closest_distance = distance;

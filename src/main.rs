@@ -17,16 +17,8 @@ use bevy_ecs_tilemap::prelude::*;
 // use bevy_embedded_assets::EmbeddedAssetPlugin;
 
 use crate::{
-    body::{
-        BodyHead, ConnectedBodies, Elbow, Facing, Leg, Legged, Locomotor, LocomotorOrchestrator,
-        PreviousVelocity,
-    },
     environment::{AuditoryEventType, EventType, SenseEvent},
-    instance::Instance,
-    multiplayer::LocalNetworkingPlugin,
-    pathfind::Pathfinding,
-    predator::Predator,
-    tilemap::{CurrentTile, MapDepth},
+    tilemap::MapDepth,
 };
 
 mod body;
@@ -203,132 +195,6 @@ fn spawn_event(
     ));
 }
 
-fn spawn_enemy(
-    mut commands: Commands,
-    window_query: Query<&Window>,
-    camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
-    tilemap_query: Query<(Entity, &MapDepth)>,
-) {
-    let Ok(window) = window_query.single() else {
-        return;
-    };
-    let Ok((camera, camera_transform)) = camera_query.single() else {
-        return;
-    };
-    let Some(cursor) = window.cursor_position().and_then(|cursor| {
-        camera
-            .viewport_to_world_2d(camera_transform, cursor / PIXEL_SCALE)
-            .ok()
-    }) else {
-        return;
-    };
-
-    let (tilemap, _) = tilemap_query
-        .iter()
-        .find(|(_, depth)| depth.0 == 1)
-        .unwrap();
-
-    let legs = commands
-        .spawn((
-            PreviousVelocity(Vec2::ZERO),
-            Legged {
-                facing: Facing::Left,
-                legs: vec![
-                    Leg::new(
-                        vec![Vec2::new(0.4, -1.0), Vec2::new(0.5, -0.5)],
-                        Vec2::new(5.0, 0.0),
-                        Vec2::new(0.3, -1.0),
-                        35.0,
-                        160.0,
-                        16.0,
-                        30.0,
-                        Elbow::Down,
-                    ),
-                    Leg::new(
-                        vec![Vec2::new(-0.2, -1.0), Vec2::new(0.5, -0.5)],
-                        Vec2::new(-5.0, 0.0),
-                        Vec2::new(-0.3, -1.0),
-                        35.0,
-                        160.0,
-                        16.0,
-                        30.0,
-                        Elbow::Down,
-                    ),
-                ],
-                holding: None,
-            },
-            Locomotor {
-                desired_velocity: Vec2::new(0.0, 0.0),
-            },
-            RigidBody::Dynamic,
-            Restitution::new(0.1),
-            Mass(1.0),
-            Collider::circle(10.0),
-            Transform::from_xyz(cursor.x, cursor.y, 0.0),
-        ))
-        .id();
-
-    let arms = commands
-        .spawn((
-            BodyHead,
-            CurrentTile::new(tilemap),
-            Predator::new(),
-            Predator::brain(),
-            Pathfinding::new(Instance::from(tilemap), cursor, cursor, 4),
-            Legged {
-                facing: Facing::Left,
-                legs: vec![
-                    Leg::new(
-                        vec![
-                            Vec2::new(-0.8, 0.5),
-                            Vec2::new(0.0, 1.0),
-                            Vec2::new(0.5, 0.5),
-                        ],
-                        Vec2::new(-5.0, 0.0),
-                        Vec2::new(-0.7, -1.0),
-                        40.0,
-                        80.0,
-                        8.0,
-                        33.0,
-                        Elbow::Up,
-                    ),
-                    Leg::new(
-                        vec![
-                            Vec2::new(-0.5, 0.5),
-                            Vec2::new(0.0, 1.0),
-                            Vec2::new(0.8, 0.5),
-                        ],
-                        Vec2::new(5.0, 0.0),
-                        Vec2::new(0.7, -1.0),
-                        40.0,
-                        80.0,
-                        8.0,
-                        33.0,
-                        Elbow::Up,
-                    ),
-                ],
-                holding: None,
-            },
-            Locomotor {
-                desired_velocity: Vec2::new(0.0, 0.0),
-            },
-            LocomotorOrchestrator(vec![legs]),
-            RigidBody::Dynamic,
-            Restitution::new(0.1),
-            Mass(0.5),
-            Collider::circle(10.0),
-            Transform::from_xyz(cursor.x, cursor.y, 0.0),
-            ConnectedBodies(vec![Instance::from(legs)]),
-        ))
-        .id();
-
-    commands
-        .entity(legs)
-        .insert(ConnectedBodies(vec![Instance::from(arms)]));
-
-    commands.spawn(DistanceJoint::new(legs, arms).with_limits(0.0, 20.0));
-}
-
 #[allow(dead_code)]
 fn camera_movement(
     time: Res<Time>,
@@ -377,7 +243,8 @@ fn main() {
         FeathersPlugins,
         Material2dPlugin::<lighting::HeightmapMaterial>::default(),
         TilemapPlugin,
-        PhysicsPlugins::default(),
+        PhysicsPlugins::default().set(PhysicsInterpolationPlugin::interpolate_all()),
+        // PhysicsDebugPlugin,
         bevy_spatial::AutomaticUpdate::<plants::Attractor>::new()
             .with_frequency(Duration::from_secs_f32(1.0))
             .with_transform(bevy_spatial::TransformMode::Transform)
@@ -425,13 +292,13 @@ fn main() {
         Update,
         (
             resize_render_target,
-            spawn_enemy.run_if(input_just_pressed(KeyCode::KeyX)),
             spawn_event.run_if(input_just_pressed(KeyCode::KeyP)),
-            // tilemap::colordepth.run_if(on_timer(Duration::from_secs(2))), // TODO: This lags, disable it later
+            tilemap::colordepth.run_if(input_just_pressed(KeyCode::KeyC)),
             (
                 player::spawn_at_mouse.run_if(input_just_pressed(MouseButton::Middle)),
                 player::pickup_drop,
             ),
+            predator::spawn_at_mouse.run_if(input_just_pressed(KeyCode::KeyX)),
             body::render,
             (
                 plants::render,
@@ -464,7 +331,12 @@ fn main() {
                 body::orchestrate,
             ),
             (items::towards_mouse, items::update_interactions),
-            (predator::process, predator::attack, predator::translate),
+            (
+                predator::process,
+                predator::attack,
+                predator::translate,
+                predator::locomote,
+            ),
             pathfind::pathfind,
             (bullets::gravity, bullets::travel),
             (health::damage, health::cooldown),

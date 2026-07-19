@@ -5,12 +5,15 @@ use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
 
 use crate::{
+    MainCamera, PIXEL_SCALE,
     body::*,
     brain::*,
     creature::Prey,
     environment::*,
+    instance::Instance,
     pathfind::Pathfinding,
-    tilemap::{CurrentTile, PhysicsTilemap},
+    player::{ConnectedSprite, PointTowards},
+    tilemap::{CurrentTile, MapDepth, PhysicsTilemap},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -164,29 +167,37 @@ pub fn process(
     }
 }
 
-pub fn translate(
-    spatial_query: SpatialQuery,
-    query: Query<(
-        Entity,
-        &mut Locomotor,
-        &mut Pathfinding,
-        &Predator,
-        &Transform,
-        Option<&ConnectedBodies>,
-    )>,
-) {
-    for (entity, mut locomotor, mut pathfinding, predator, transform, connected) in query {
-        const DIRECTIONS: [Dir2; 4] = [Dir2::NEG_X, Dir2::X, Dir2::NEG_Y, Dir2::Y];
-
+pub fn translate(query: Query<(&mut Pathfinding, &Predator, &Transform)>) {
+    for (mut pathfinding, predator, transform) in query {
         let pos = transform.translation.xy();
         let movement = predator.desired_movement;
 
         pathfinding.from = pos;
         pathfinding.to = pos + movement;
+        pathfinding.urgency = movement.length();
+    }
+}
+
+pub fn locomote(
+    spatial_query: SpatialQuery,
+    query: Query<(
+        Entity,
+        &mut Locomotor,
+        &mut Pathfinding,
+        &Transform,
+        Option<&ConnectedBodies>,
+    )>,
+) {
+    for (entity, mut locomotor, mut pathfinding, transform, connected) in query {
+        const DIRECTIONS: [Dir2; 4] = [Dir2::NEG_X, Dir2::X, Dir2::NEG_Y, Dir2::Y];
+
+        let pos = transform.translation.xy();
+        pathfinding.from = pos;
+
         let Some(direction) = pathfinding.direction else {
             continue;
         };
-        let mut movement = direction * movement.length();
+        let mut movement = direction * pathfinding.urgency;
 
         let mut excluded = vec![entity];
         if let Some(connected) = connected {
@@ -197,7 +208,7 @@ pub fn translate(
 
         for direction in DIRECTIONS {
             if let Some(_data) = spatial_query.cast_ray(
-                pos,
+                transform.translation.xy(),
                 direction,
                 20.0,
                 true,
@@ -213,8 +224,248 @@ pub fn translate(
             }
         }
 
-        locomotor.desired_velocity = movement;
+        locomotor.desired_velocity = dbg!(movement);
     }
+}
+
+pub fn spawn_at_mouse(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    window_query: Query<&Window>,
+    camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
+    tilemap_query: Query<(Entity, &MapDepth)>,
+) {
+    let Ok(window) = window_query.single() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera_query.single() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position().and_then(|cursor| {
+        camera
+            .viewport_to_world_2d(camera_transform, cursor / PIXEL_SCALE)
+            .ok()
+    }) else {
+        return;
+    };
+
+    let (tilemap, _) = tilemap_query
+        .iter()
+        .find(|(_, depth)| depth.0 == 1)
+        .unwrap();
+
+    const MASS: f32 = 0.5;
+
+    let legs = commands
+        .spawn((
+            // Predator::new(),
+            // Predator::brain(),
+            Pathfinding::new(Instance::from(tilemap), cursor, cursor, 4),
+            PreviousVelocity(Vec2::ZERO),
+            Legged {
+                facing: Facing::Left,
+                legs: vec![
+                    Leg::new(
+                        vec![
+                            Vec2::new(0.4, -1.0),
+                            Vec2::new(0.5, -0.5),
+                            // Vec2::new(1.0, 0.0),
+                            // Vec2::new(0.5, 0.5),
+                        ],
+                        Vec2::new(5.0, 0.0),
+                        Vec2::new(0.3, -1.0),
+                        35.0,
+                        160.0,
+                        16.0,
+                        30.0,
+                        Elbow::Down,
+                    ),
+                    Leg::new(
+                        vec![
+                            Vec2::new(-0.2, -1.0),
+                            Vec2::new(-0.5, -0.5),
+                            // Vec2::new(-1.0, 0.0),
+                            // Vec2::new(-0.5, 0.5),
+                        ],
+                        Vec2::new(-5.0, 0.0),
+                        Vec2::new(-0.3, -1.0),
+                        35.0,
+                        160.0,
+                        16.0,
+                        30.0,
+                        Elbow::Down,
+                    ),
+                ],
+                holding: None,
+            },
+            Locomotor {
+                desired_velocity: Vec2::new(0.0, 0.0),
+            },
+            RigidBody::Dynamic,
+            Restitution::new(0.1),
+            Mass(MASS),
+            Collider::circle(10.0),
+            Transform::from_xyz(cursor.x, cursor.y, 0.0),
+        ))
+        .id();
+
+    let arms = commands
+        .spawn((
+            BodyHead,
+            // CurrentTile::new(tilemap),
+            // Predator::new(),
+            // Predator::brain(),
+            Pathfinding::new(Instance::from(tilemap), cursor, cursor, 4),
+            Legged {
+                facing: Facing::Left,
+                legs: vec![
+                    Leg::new(
+                        vec![
+                            Vec2::new(-0.8, 0.5),
+                            Vec2::new(0.0, 1.0),
+                            Vec2::new(0.5, 0.5),
+                        ],
+                        Vec2::new(-5.0, 0.0),
+                        Vec2::new(-0.7, -1.0),
+                        40.0,
+                        80.0,
+                        8.0,
+                        33.0,
+                        Elbow::Up,
+                    ),
+                    Leg::new(
+                        vec![
+                            Vec2::new(-0.5, 0.5),
+                            Vec2::new(0.0, 1.0),
+                            Vec2::new(0.8, 0.5),
+                        ],
+                        Vec2::new(5.0, 0.0),
+                        Vec2::new(0.7, -1.0),
+                        40.0,
+                        80.0,
+                        8.0,
+                        33.0,
+                        Elbow::Up,
+                    ),
+                ],
+                holding: None,
+            },
+            Locomotor {
+                desired_velocity: Vec2::new(0.0, 0.0),
+            },
+            RigidBody::Dynamic,
+            Restitution::new(0.1),
+            Mass(MASS),
+            Collider::circle(10.0),
+            Transform::from_xyz(cursor.x, cursor.y, 0.0),
+        ))
+        .id();
+
+    let torso = commands
+        .spawn((
+            CurrentTile::new(tilemap),
+            Predator::new(),
+            Predator::brain(),
+            Pathfinding::new(Instance::from(tilemap), cursor, cursor, 4),
+            PathfindOrchestrator(vec![arms, legs]),
+            PreviousVelocity(Vec2::ZERO),
+            Legged {
+                facing: Facing::Left,
+                legs: vec![
+                    Leg::new(
+                        vec![Vec2::new(0.4, -1.0), Vec2::new(0.5, -0.5)],
+                        Vec2::new(5.0, 0.0),
+                        Vec2::new(0.3, -1.0),
+                        35.0,
+                        160.0,
+                        16.0,
+                        30.0,
+                        Elbow::Down,
+                    ),
+                    Leg::new(
+                        vec![Vec2::new(-0.2, -1.0), Vec2::new(-0.5, -0.5)],
+                        Vec2::new(-5.0, 0.0),
+                        Vec2::new(-0.3, -1.0),
+                        35.0,
+                        160.0,
+                        16.0,
+                        30.0,
+                        Elbow::Down,
+                    ),
+                ],
+                holding: None,
+            },
+            Locomotor {
+                desired_velocity: Vec2::new(0.0, 0.0),
+            },
+            RigidBody::Dynamic,
+            Restitution::new(0.1),
+            Mass(MASS),
+            Collider::circle(10.0),
+            Transform::from_xyz(cursor.x, cursor.y, 0.0),
+            ConnectedBodies(vec![Instance::from(arms), Instance::from(legs)]),
+        ))
+        .id();
+
+    commands.spawn((
+        ConnectedSprite(Instance::from(arms)),
+        PointTowards {
+            what: torso,
+            backwards: false,
+            offset: 5.0,
+            mix: Some((Vec2::NEG_Y, 0.2)),
+        },
+        Sprite::from_image(asset_server.load("predator_head.png")),
+        Transform::from_scale(Vec3::splat(2.0)),
+    ));
+
+    commands.spawn((
+        ConnectedSprite(Instance::from(torso)),
+        PointTowards {
+            what: arms,
+            backwards: true,
+            offset: 5.0,
+            mix: None,
+        },
+        Sprite::from_image(asset_server.load("predator_torso.png")),
+        Transform::from_scale(Vec3::splat(2.0)),
+    ));
+
+    commands.spawn((
+        ConnectedSprite(Instance::from(legs)),
+        PointTowards {
+            what: torso,
+            backwards: true,
+            offset: 5.0,
+            mix: None,
+        },
+        Sprite::from_image(asset_server.load("predator_torso.png")),
+        Transform::from_scale(Vec3::splat(2.0)),
+    ));
+
+    commands
+        .entity(legs)
+        .insert(ConnectedBodies(vec![Instance::from(torso)]));
+
+    commands
+        .entity(arms)
+        .insert(ConnectedBodies(vec![Instance::from(torso)]));
+
+    let limit = 20.0_f32.to_radians();
+
+    commands.spawn(
+        RevoluteJoint::new(arms, torso)
+            .with_local_anchor1(Vec2::new(0.0, -14.5))
+            .with_local_anchor2(Vec2::new(0.0, 14.5))
+            .with_angle_limits(-limit, limit),
+    );
+
+    commands.spawn(
+        RevoluteJoint::new(torso, legs)
+            .with_local_anchor1(Vec2::new(0.0, -14.5))
+            .with_local_anchor2(Vec2::new(0.0, 14.5))
+            .with_angle_limits(-limit, limit),
+    );
 }
 
 impl SmartEntity<Action<PredatorAction>> for Predator {
