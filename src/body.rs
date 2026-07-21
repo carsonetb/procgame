@@ -125,6 +125,12 @@ pub struct Locomotor {
 #[derive(Component, Debug, Clone)]
 pub struct PathfindOrchestrator(pub Vec<Entity>);
 
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AvoidWalls {
+    pub distance: f32,
+    pub max_force: f32,
+}
+
 pub fn stand(
     spatial_query: SpatialQuery,
     query: Query<
@@ -373,6 +379,35 @@ pub fn orchestrate(
             let mut pathfinding = pathfinders.get_mut(*entity).unwrap();
             pathfinding.to = master.to;
             pathfinding.urgency = master.urgency;
+        }
+    }
+}
+
+pub fn avoid<const DEBUG: bool>(
+    mut gizmos: Gizmos,
+    spatial_query: SpatialQuery,
+    q_body: Query<(Entity, Forces, &AvoidWalls, &Transform)>,
+) {
+    for (entity, mut forces, avoidance, transform) in q_body {
+        let pos = transform.translation.xy();
+        for axis in Dir2::CARDINALS {
+            if DEBUG {
+                gizmos.line_2d(pos, pos + axis * avoidance.distance, Color::WHITE);
+            }
+
+            let Some(data) = spatial_query.cast_ray(
+                pos,
+                axis,
+                avoidance.distance,
+                false,
+                &SpatialQueryFilter::from_excluded_entities([entity]),
+            ) else {
+                continue;
+            };
+
+            forces.apply_force(
+                -axis.as_vec2() * avoidance.max_force * (data.distance / avoidance.distance).abs(),
+            );
         }
     }
 }

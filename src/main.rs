@@ -99,7 +99,7 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, window: Quer
         MainCamera,
         RenderTarget::Image(image_handle.clone().into()),
         Projection::Orthographic(OrthographicProjection {
-            scale: PIXEL_SCALE,
+            scale: PIXEL_SCALE * (1200.0 / window.width()),
             ..OrthographicProjection::default_2d()
         }),
         GlobalTransform::from(Transform::from_xyz(0.0, 0.0, 0.0)),
@@ -112,12 +112,16 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>, window: Quer
             order: 0,
             ..default()
         },
+        Projection::Orthographic(OrthographicProjection {
+            scale: 1200.0 / window.width(),
+            ..OrthographicProjection::default_2d()
+        }),
         RenderLayers::layer(1),
     ));
 
     commands.spawn((
         Sprite::from_image(image_handle),
-        Transform::from_scale(Vec3::splat(PIXEL_SCALE)),
+        Transform::from_scale(Vec3::splat((1200.0 / window.width()) * PIXEL_SCALE)),
         RenderLayers::layer(1),
     ));
 }
@@ -329,6 +333,7 @@ fn main() {
                 body::animate,
                 body::balance,
                 body::orchestrate,
+                body::avoid::<false>,
             ),
             (items::towards_mouse, items::update_interactions),
             (

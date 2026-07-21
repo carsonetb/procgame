@@ -260,6 +260,10 @@ pub fn spawn_at_mouse(
         .spawn((
             // Predator::new(),
             // Predator::brain(),
+            AvoidWalls {
+                distance: 50.0,
+                max_force: 500.0,
+            },
             Pathfinding::new(Instance::from(tilemap), cursor, cursor, 4),
             PreviousVelocity(Vec2::ZERO),
             Legged {
@@ -315,6 +319,10 @@ pub fn spawn_at_mouse(
             // CurrentTile::new(tilemap),
             // Predator::new(),
             // Predator::brain(),
+            AvoidWalls {
+                distance: 50.0,
+                max_force: 500.0,
+            },
             Pathfinding::new(Instance::from(tilemap), cursor, cursor, 4),
             Legged {
                 facing: Facing::Left,
@@ -363,6 +371,10 @@ pub fn spawn_at_mouse(
 
     let torso = commands
         .spawn((
+            AvoidWalls {
+                distance: 50.0,
+                max_force: 500.0,
+            },
             CurrentTile::new(tilemap),
             Predator::new(),
             Predator::brain(),
