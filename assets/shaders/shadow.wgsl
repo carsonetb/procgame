@@ -1,7 +1,10 @@
 #import bevy_sprite::mesh2d_vertex_output::VertexOutput
 
-@group(2) @binding(0) var heightmap: texture_2d<f32>;
-@group(2) @binding(1) var heightmap_sampler: sampler;
+@group(2) @binding(0) var front_heightmap: texture_2d<f32>;
+@group(2) @binding(1) var front_sampler: sampler;
+
+@group(2) @binding(2) var back_heightmap: texture_2d<f32>;
+@group(2) @binding(3) var back_sampler: sampler;
 
 struct ShadowSettings {
     light_dir: vec3<f32>,
@@ -10,13 +13,13 @@ struct ShadowSettings {
     step_size: f32,
     max_steps: i32,
 };
-@group(2) @binding(2) var<uniform> settings: ShadowSettings;
+@group(2) @binding(4) var<uniform> settings: ShadowSettings;
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = in.uv;
 
-    let base_color = textureSample(heightmap, heightmap_sampler, uv);
+    let base_color = textureSample(front_heightmap, front_sampler, uv);
     let base_height = base_color.r * settings.height_scale;
 
     if base_color.a < 0.1 {
@@ -41,10 +44,13 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
             break;
         }
 
-        let sample_color = textureSample(heightmap, heightmap_sampler, current_uv);
-        let sampled_height = sample_color.r * settings.height_scale;
+        let front_color = textureSample(front_heightmap, front_sampler, current_uv);
+        let front_height = front_color.r * settings.height_scale;
 
-        if sampled_height > current_ray_height {
+        let back_color = textureSample(back_heightmap, back_sampler, current_uv);
+        let back_height = back_color.r * settings.height_scale;
+
+        if front_height > current_ray_height && back_height < current_ray_height {
             is_in_shadow = true;
             break;
         }

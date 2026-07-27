@@ -28,7 +28,8 @@ pub struct LightingData {
 }
 
 pub struct Heightmap {
-    pub image: Image,
+    pub front: Image,
+    pub back: Image,
 }
 
 #[derive(Debug, Clone, ShaderType)]
@@ -45,9 +46,13 @@ pub struct ShadowSettings {
 pub struct HeightmapMaterial {
     #[texture(0)]
     #[sampler(1)]
-    pub heightmap: Handle<Image>,
+    pub front: Handle<Image>,
 
-    #[uniform(2)]
+    #[texture(2)]
+    #[sampler(3)]
+    pub back: Handle<Image>,
+
+    #[uniform(4)]
     pub settings: ShadowSettings,
 }
 
@@ -69,7 +74,7 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
     data.layers.reverse();
     // Sorted from closest to camera to furthest from camera.
 
-    let mut image = Image::new(
+    let mut front = Image::new(
         Extent3d {
             width: data.size.x,
             height: data.size.y,
@@ -77,6 +82,18 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
         },
         TextureDimension::D2,
         vec![0; (data.size.x * data.size.y * 4) as usize],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+
+    let mut back = Image::new(
+        Extent3d {
+            width: data.size.x,
+            height: data.size.y,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        vec![255; (data.size.x * data.size.y * 4) as usize],
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
@@ -89,8 +106,11 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
 
             for layer in &data.layers {
                 let colordepth = 1.0 + (layer.depth as f32) / 20.0;
-                let already = image.get_color_at(x, data.size.y - y - 1).unwrap();
-                if colordepth < already.to_srgba().red {
+                let front_already = front.get_color_at(x, data.size.y - y - 1).unwrap();
+                let back_already = back.get_color_at(x, data.size.y - y - 1).unwrap();
+                if colordepth < front_already.to_srgba().red
+                    && colordepth > back_already.to_srgba().red
+                {
                     continue;
                 }
 
@@ -98,18 +118,18 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
                 let grid = (relative / layer.tile_size).floor().as_uvec2();
                 let index = grid.y * layer.map_size.x + grid.x;
 
-                for transform in &layer.plants {
-                    let world = (pos - half) * 2.0;
-                    let inverse = transform.compute_affine().inverse();
-                    let local = inverse.transform_point3(world.extend(0.0));
-                    if local.length() < 1.0 {
-                        image
-                            .set_color_at(x, data.size.y - y - 1, Color::srgb(colordepth, 0.0, 0.0))
-                            .unwrap();
+                // for transform in &layer.plants {
+                //     let world = (pos - half) * 2.0;
+                //     let inverse = transform.compute_affine().inverse();
+                //     let local = inverse.transform_point3(world.extend(0.0));
+                //     if local.length() < 1.0 {
+                //         front_image
+                //             .set_color_at(x, data.size.y - y - 1, Color::srgb(colordepth, 0.0, 0.0))
+                //             .unwrap();
 
-                        break;
-                    }
-                }
+                //         break;
+                //     }
+                // }
 
                 if let Some(Some(atlas_point)) = layer.tiles.get(index as usize) {
                     let local_relative = relative - (grid.as_vec2() * layer.tile_size);
@@ -127,15 +147,26 @@ pub fn construct_heightmap(mut data: LightingData) -> Heightmap {
                         continue;
                     }
 
-                    image
-                        .set_color_at(x, data.size.y - y - 1, Color::srgb(colordepth, 0.0, 0.0))
+                    if colordepth > front_already.to_srgba().red {
+                        front
+                            .set_color_at(x, data.size.y - y - 1, Color::srgb(colordepth, 0.0, 0.0))
+                            .unwrap();
+                    }
+
+                    if colordepth < back_already.to_srgba().red {
+                        back.set_color_at(
+                            x,
+                            data.size.y - y - 1,
+                            Color::srgb(colordepth, 0.0, 0.0),
+                        )
                         .unwrap();
+                    }
                 }
             }
         }
     }
 
-    Heightmap { image }
+    Heightmap { front, back }
 }
 
 pub fn trigger_heightmap_work(
@@ -172,10 +203,14 @@ pub fn poll_heightmap_work(
 ) {
     for (entity, mut task) in tasks {
         if let Some(heightmap) = block_on(poll_once(&mut task.0)) {
-            let dynamic = heightmap.image.clone().try_into_dynamic().unwrap();
-            dynamic.save("heightmap.png").unwrap();
+            let dynamic = heightmap.front.clone().try_into_dynamic().unwrap();
+            dynamic.save("heightmap_front.png").unwrap();
 
-            let handle = asset_server.add(heightmap.image);
+            let dynamic = heightmap.back.clone().try_into_dynamic().unwrap();
+            dynamic.save("heightmap_back.png").unwrap();
+
+            let front = asset_server.add(heightmap.front);
+            let back = asset_server.add(heightmap.back);
             let settings = ShadowSettings {
                 light_dir: Vec3::new(-1.0, -0.5, 0.8),
                 height_scale: 20.0,
@@ -185,7 +220,8 @@ pub fn poll_heightmap_work(
                 _padding: Vec2::default(),
             };
             let material = HeightmapMaterial {
-                heightmap: handle,
+                front,
+                back,
                 settings,
             };
 

@@ -68,6 +68,8 @@ pub fn towards_mouse(
             continue;
         }
 
+        // println!("set rot");
+
         transform.rotation = Quat::from_rotation_z((cursor - player_pos).to_angle());
         let cursor_direction = (cursor + Vec2::new(0.01, 0.01) - player_pos).normalize();
 
@@ -82,13 +84,20 @@ pub fn towards_mouse(
 
 pub fn update_interactions(
     mut commands: Commands,
-    q_items: Query<(Entity, &Item, &RigidBody, &mut LinearVelocity)>,
+    q_items: Query<(
+        Entity,
+        &Item,
+        &RigidBody,
+        &mut LinearVelocity,
+        &mut AngularVelocity,
+    )>,
 ) {
-    for (entity, item, body, mut velocity) in q_items {
+    for (entity, item, body, mut velocity, mut avel) in q_items {
         if item.held
             && let RigidBody::Dynamic = body
         {
             *velocity = LinearVelocity::default();
+            *avel = AngularVelocity::default();
             commands.entity(entity).insert(RigidBody::Kinematic);
         }
         if !item.held
