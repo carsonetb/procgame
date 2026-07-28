@@ -1,7 +1,11 @@
 use std::{collections::HashMap, f32};
 
-use bevy::prelude::*;
-use bevy_spatial::SpatialAccess;
+use bevy::{
+    math::FloatPow,
+    prelude::*,
+    tasks::{AsyncComputeTaskPool, Task, block_on, poll_once},
+};
+use bevy_spatial::{SpatialAccess, kdtree::KDTree2};
 
 use crate::{MainCamera, PIXEL_SCALE, instance::Instance};
 
@@ -28,6 +32,7 @@ pub struct Params {
     /// Percentage that a branch's direction can vary from it's parent.
     pub variance: f32,
     pub min_vigor: f32,
+    pub branches: i32,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -55,6 +60,21 @@ pub struct Branch {
 pub struct Attractor {
     pub pos: Vec2,
 }
+
+struct AddedBranch {
+    branch: Branch,
+    from: usize,
+}
+
+pub struct PlantData {
+    params: Params,
+    attractors: bevy_spatial::kdtree::KDTree2<Attractor>,
+    branches: Vec<(Entity, Branch)>,
+    added: Vec<AddedBranch>,
+}
+
+#[derive(Component)]
+pub struct PlantsTask(Task<PlantData>);
 
 pub fn setup(
     mut commands: Commands,
@@ -87,136 +107,194 @@ pub fn clamp_direction(target_dir: Vec2, reference_dir: Vec2, max_angle_radians:
     )
 }
 
-pub fn grow(
-    mut commands: Commands,
-    time: Res<Time>,
-    tree: Res<bevy_spatial::kdtree::KDTree2<Attractor>>,
-    assets: Res<BranchAssets>,
-    q_params: Query<&Params>,
-    q_branch: Query<(Entity, &mut Branch), Without<Final>>,
-    q_tip: Query<&Tip>,
-) {
-    let mut attractors = Vec::new();
-    let mut distances = HashMap::new();
+pub fn grow_task(mut data: PlantData) -> PlantData {
+    let mut attractor_owners = HashMap::new();
 
-    for (entity, mut branch) in q_branch {
-        let params = q_params.get(branch.params.entity).unwrap();
+    for (i, (_, branch)) in data.branches.iter().enumerate() {
+        let is_finished = branch.length >= data.params.max_length
+            && branch.offshoots.len() >= data.params.branches as usize;
+        if is_finished {
+            continue;
+        }
 
-        for (pos, entity) in tree.within_distance(branch.pos, params.attraction) {
+        // Branches grow from their tip, so measure distance from the tip!
+        let tip_pos = if let Some(dir) = branch.direction {
+            branch.pos + dir * branch.length
+        } else {
+            branch.pos
+        };
+
+        let within = data
+            .attractors
+            .within_distance(tip_pos, data.params.attraction);
+
+        for (pos, entity) in within {
             let Some(entity) = entity else {
                 continue;
             };
-            let distance_sq = branch.pos.distance_squared(pos);
-            if let Some(other) = distances.get(&entity)
-                && distance_sq > *other
-            {
-                continue;
-            }
-            if distance_sq < params.attraction * params.attraction {
-                attractors.push(pos);
-                distances.insert(entity, distance_sq);
+
+            let distance_sq = tip_pos.distance_squared(pos);
+
+            if distance_sq < data.params.attraction.squared() {
+                let entry = attractor_owners.entry(entity).or_insert((i, f32::MAX, pos));
+                // Only overwrite if this branch is strictly closer
+                if distance_sq < entry.1 {
+                    *entry = (i, distance_sq, pos);
+                }
             }
         }
+    }
 
-        if branch.length < params.max_length {
-            if branch.vigor > params.min_vigor {
-                branch.length +=
-                    params.growth * attractors.len() as f32 * time.delta_secs() * branch.vigor;
-            }
-        } else if branch.offshoots.len() < 2 {
-            let split_id = commands
-                .spawn((
-                    Tip,
-                    Branch {
-                        parent_direction: Some(branch.direction.unwrap()),
-                        offshoots: Vec::new(),
-                        pos: branch.pos,
-                        direction: None,
-                        length: 0.0,
-                        width: params.base_width,
-                        params: branch.params,
-                        vigor: branch.vigor
-                            * (branch.direction.unwrap().dot(Vec2::Y) / 4.0 + 0.75).max(0.1),
-                    },
-                    Mesh2d(assets.mesh.clone()),
-                    MeshMaterial2d(assets.material.clone()),
-                    Transform::default(),
-                ))
-                .id();
-            branch.offshoots.push(split_id);
+    let mut branch_attractors: HashMap<usize, Vec<Vec2>> = HashMap::new();
+    for (_, (branch_idx, _, pos)) in attractor_owners {
+        branch_attractors.entry(branch_idx).or_default().push(pos);
+    }
 
-            if q_tip.get(entity).is_ok() {
-                commands.entity(entity).remove::<Tip>();
-            }
+    for (i, (_, branch)) in data.branches.iter_mut().enumerate() {
+        let attractors = branch_attractors
+            .get(&i)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
 
-            if branch.offshoots.len() == 2 {
-                commands.get_entity(entity).unwrap().insert(Final);
+        if branch.length < data.params.max_length {
+            if branch.vigor > data.params.min_vigor {
+                branch.length += data.params.growth * attractors.len() as f32 * 0.01 * branch.vigor;
             }
+        } else if branch.offshoots.len() < data.params.branches as usize {
+            data.added.push(AddedBranch {
+                branch: Branch {
+                    parent_direction: Some(branch.direction.unwrap()),
+                    offshoots: Vec::new(),
+                    pos: branch.pos + branch.direction.unwrap() * branch.length,
+                    direction: None,
+                    length: 0.0,
+                    width: data.params.base_width,
+                    params: branch.params,
+                    vigor: branch.vigor
+                        * (branch.direction.unwrap().dot(Vec2::Y) / 4.0 + 0.75).max(0.1),
+                },
+                from: i,
+            });
         }
 
         if branch.direction.is_none() && !attractors.is_empty() {
             let target = attractors.iter().sum::<Vec2>() / attractors.len() as f32;
-            let gravity = Vec2::new(0.0, (-0.2 * (1.0 - branch.width / 50.0)).max(0.0));
-            branch.direction = Some((target - branch.pos).normalize() + gravity);
+            let tropism = Vec2::Y * (0.5 * branch.vigor);
+            let gravity = Vec2::new(0.0, (-0.2 * (1.0 - data.params.base_width / 50.0)).max(0.0));
+            let mut direction =
+                Some(((target - branch.pos).normalize() + tropism + gravity).normalize());
+
             if let Some(parent) = branch.parent_direction {
-                branch.direction = Some(clamp_direction(
-                    branch.direction.unwrap(),
+                let stiffness = branch.vigor.clamp(0.0, 1.0);
+                let dynamic_variance = data.params.variance * (1.0 - (stiffness * 0.75));
+                direction = Some(clamp_direction(
+                    direction.unwrap(),
                     parent,
-                    params.variance * f32::consts::PI,
+                    dynamic_variance * std::f32::consts::PI,
                 ));
+            }
+            branch.direction = direction;
+        }
+    }
+
+    data
+}
+
+pub fn poll_grow_task(
+    mut commands: Commands,
+    assets: Res<BranchAssets>,
+    q_task: Query<(Entity, &mut PlantsTask)>,
+    q_tip: Query<&Tip>,
+    mut q_branch: Query<&mut Branch>,
+) {
+    for (entity, mut task) in q_task {
+        let Some(mut data) = block_on(poll_once(&mut task.0)) else {
+            continue;
+        };
+
+        for (entity, branch) in &data.branches {
+            let mut live = q_branch.get_mut(*entity).unwrap();
+            live.length = branch.length;
+            live.direction = branch.direction;
+        }
+
+        let mut finals = Vec::new();
+        for branch in data.added.drain(..) {
+            let entity = commands
+                .spawn((
+                    Tip,
+                    branch.branch.clone(),
+                    Mesh2d(assets.mesh.clone()),
+                    MeshMaterial2d(assets.material.clone()),
+                    Transform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            data.branches.push((entity, branch.branch));
+
+            let (from_entity, from) = data.branches.get_mut(branch.from).unwrap();
+            from.offshoots.push(entity);
+            q_branch
+                .get_mut(*from_entity)
+                .unwrap()
+                .offshoots
+                .push(entity);
+
+            if q_tip.get(*from_entity).is_ok() {
+                commands.entity(*from_entity).remove::<Tip>();
+            }
+
+            if from.offshoots.len() == data.params.branches as usize {
+                commands.get_entity(*from_entity).unwrap().insert(Final);
+                finals.push(*from_entity);
             }
         }
 
-        attractors.clear();
+        for entity in finals {
+            if let Some(remove) = data.branches.iter().rposition(|(e, _)| e == &entity) {
+                data.branches.remove(remove);
+            }
+        }
+
+        commands.entity(entity).despawn();
+
+        let thread_pool = AsyncComputeTaskPool::get();
+        let task = thread_pool.spawn(async move { grow_task(data) });
+        commands.spawn(PlantsTask(task));
     }
 }
 
 pub fn kill(
-    mut commands: Commands,
+    commands: ParallelCommands,
     tree: Res<bevy_spatial::kdtree::KDTree2<Attractor>>,
     q_params: Query<&Params>,
-    q_branch: Query<&Branch>,
+    q_branch: Query<&Branch, With<Tip>>,
 ) {
-    for branch in q_branch {
+    q_branch.par_iter().for_each(|branch| {
         let Some(direction) = branch.direction else {
-            continue;
+            return;
         };
 
         let params = q_params.get(branch.params.entity).unwrap();
 
-        for (pos, entity) in tree.within_distance(branch.pos, params.attraction) {
+        for (pos, entity) in
+            tree.within_distance(branch.pos + direction * branch.length, params.attraction)
+        {
             let Some(entity) = entity else {
                 continue;
             };
-            if (branch.pos + direction * branch.length).distance(pos) < params.kill
-                && let Ok(mut entity) = commands.get_entity(entity)
-            {
-                entity.despawn();
-            }
+            commands.command_scope(|mut commands| {
+                if (branch.pos + direction * branch.length).distance(pos) < params.kill
+                    && let Ok(mut entity) = commands.get_entity(entity)
+                {
+                    entity.despawn();
+                }
+            })
         }
-    }
+    });
 }
 
-pub fn position(
-    q_root: Query<&Branch, With<Root>>,
-    mut q_branch: Query<&mut Branch, Without<Root>>,
-) {
-    for root in q_root {
-        position_root(root, &mut q_branch);
-    }
-}
-
-fn position_root(root: &Branch, q_branch: &mut Query<&mut Branch, Without<Root>>) {
-    for entity in &root.offshoots {
-        let Ok(mut offshoot) = q_branch.get_mut(*entity) else {
-            continue;
-        };
-        offshoot.pos = root.pos + root.direction.unwrap() * root.length;
-        position_root(&offshoot.clone(), q_branch);
-    }
-}
-
-pub fn width(q_params: Query<&Params>, mut q_branches: Query<(Entity, &mut Branch)>) {
+pub fn width(q_params: Query<&Params>, mut q_branches: Query<(Entity, &mut Branch), With<Final>>) {
     let mut new_widths = Vec::with_capacity(q_branches.iter().count());
 
     for (entity, branch) in q_branches.iter() {
@@ -252,7 +330,7 @@ pub fn render(q_branch: Query<(&Branch, &mut Transform)>) {
         if let Some(direction) = branch.direction {
             let pos = branch.pos + direction * branch.length / 2.0;
             *transform = Transform::from_translation(Vec3::new(pos.x, pos.y, 0.0))
-                .with_scale(Vec3::new(branch.length, branch.width, 1.0))
+                .with_scale(Vec3::new(branch.length, branch.width.max(1.5), 1.0))
                 .with_rotation(Quat::from_rotation_z(direction.to_angle()));
         }
     }
@@ -311,6 +389,7 @@ pub fn spawn_root(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    attractors: Res<bevy_spatial::kdtree::KDTree2<Attractor>>,
     window_query: Query<&Window>,
     camera_query: Query<(&Camera, &mut GlobalTransform), With<MainCamera>>,
 ) {
@@ -328,34 +407,51 @@ pub fn spawn_root(
         return;
     };
 
-    let params = commands
-        .spawn(Params {
-            attraction: 80.0,
-            kill: 5.0,
-            max_length: 7.0,
-            base_width: 1.5,
-            growth: 3.0,
-            exponent: 2.8,
-            variance: 0.25,
-            min_vigor: 0.1,
-        })
+    let params = Params {
+        attraction: 35.0,
+        kill: 5.0,
+        max_length: 4.0,
+        base_width: 1.0,
+        growth: 10.0,
+        exponent: 2.8,
+        variance: 0.15,
+        min_vigor: 0.05,
+        branches: 2,
+    };
+
+    let params_entity = commands.spawn(params.clone()).id();
+
+    let branch = Branch {
+        parent_direction: None,
+        offshoots: Vec::new(),
+        pos: cursor,
+        direction: Some(Vec2::Y),
+        length: 0.0,
+        width: 1.0,
+        vigor: 1.0,
+        params: Instance::from(params_entity),
+    };
+    let branch_entity = commands
+        .spawn((
+            Root,
+            Tip,
+            branch.clone(),
+            Mesh2d(meshes.add(Rectangle::default())),
+            MeshMaterial2d(materials.add(Color::WHITE)),
+            Transform::default(),
+        ))
         .id();
 
-    commands.spawn((
-        Root,
-        Tip,
-        Branch {
-            parent_direction: None,
-            offshoots: Vec::new(),
-            pos: cursor,
-            direction: None,
-            length: 0.0,
-            width: 2.0,
-            vigor: 1.0,
-            params: Instance::from(params),
-        },
-        Mesh2d(meshes.add(Rectangle::default())),
-        MeshMaterial2d(materials.add(Color::WHITE)),
-        Transform::default(),
-    ));
+    let mut tree = KDTree2::default();
+    tree.tree = attractors.tree.clone();
+    let data = PlantData {
+        params,
+        attractors: tree,
+        branches: vec![(branch_entity, branch)],
+        added: Vec::new(),
+    };
+
+    let thread_pool = AsyncComputeTaskPool::get();
+    let task = thread_pool.spawn(async move { grow_task(data) });
+    commands.spawn(PlantsTask(task));
 }

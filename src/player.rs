@@ -39,6 +39,7 @@ pub struct ConnectedSprite(pub Instance<Transform>);
 #[derive(Component, Debug, Clone, Copy)]
 pub struct PointTowards {
     pub what: Entity,
+    pub also: Option<Entity>,
     pub backwards: bool,
     pub offset: f32,
     pub mix: Option<(Vec2, f32)>,
@@ -120,6 +121,13 @@ pub fn point_sprites(
         let other_transform = q_other.get(towards.what).unwrap();
         let mut offset =
             (other_transform.translation.xy() - transform.translation.xy()).normalize();
+        if let Some(also) = towards.also {
+            let also_transform = q_other.get(also).unwrap();
+            offset = offset.lerp(
+                -(also_transform.translation.xy() - transform.translation.xy()).normalize(),
+                0.5,
+            );
+        }
         if let Some((towards, percent)) = towards.mix {
             offset = offset.lerp(towards, percent);
         }
@@ -281,6 +289,7 @@ pub fn spawn_at_mouse(
         ConnectedSprite(Instance::from(arms)),
         PointTowards {
             what: legs,
+            also: None,
             backwards: false,
             offset: 5.0,
             mix: Some((Vec2::NEG_Y, 0.2)),
@@ -293,6 +302,7 @@ pub fn spawn_at_mouse(
         ConnectedSprite(Instance::from(legs)),
         PointTowards {
             what: arms,
+            also: None,
             backwards: true,
             offset: 5.0,
             mix: None,

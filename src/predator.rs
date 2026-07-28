@@ -224,7 +224,7 @@ pub fn locomote(
             }
         }
 
-        locomotor.desired_velocity = dbg!(movement);
+        locomotor.desired_velocity = movement;
     }
 }
 
@@ -423,6 +423,7 @@ pub fn spawn_at_mouse(
         ConnectedSprite(Instance::from(arms)),
         PointTowards {
             what: torso,
+            also: None,
             backwards: false,
             offset: 5.0,
             mix: Some((Vec2::NEG_Y, 0.2)),
@@ -435,6 +436,7 @@ pub fn spawn_at_mouse(
         ConnectedSprite(Instance::from(torso)),
         PointTowards {
             what: arms,
+            also: Some(legs),
             backwards: true,
             offset: 5.0,
             mix: None,
@@ -447,11 +449,12 @@ pub fn spawn_at_mouse(
         ConnectedSprite(Instance::from(legs)),
         PointTowards {
             what: torso,
+            also: None,
             backwards: true,
             offset: 5.0,
             mix: None,
         },
-        Sprite::from_image(asset_server.load("predator_torso.png")),
+        Sprite::from_image(asset_server.load("predator_legs.png")),
         Transform::from_scale(Vec3::splat(2.0)),
     ));
 

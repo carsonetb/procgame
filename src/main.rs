@@ -11,6 +11,7 @@ use bevy::{
         Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
     },
     sprite_render::Material2dPlugin,
+    time::common_conditions::on_timer,
     window::WindowResized,
 };
 use bevy_ecs_tilemap::prelude::*;
@@ -345,7 +346,13 @@ fn main() {
             pathfind::pathfind,
             (bullets::gravity, bullets::travel),
             (health::damage, health::cooldown),
-            (plants::grow, plants::kill, plants::position, plants::width),
+            (
+                // plants::grow,
+                plants::poll_grow_task.run_if(on_timer(Duration::from_millis(100))),
+                plants::kill,
+                // plants::position,
+                plants::width,
+            ),
             (environment::process, environment::sound, environment::emit),
             (
                 tilemap::bitmap.run_if(
