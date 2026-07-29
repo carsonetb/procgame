@@ -349,7 +349,7 @@ fn main() {
             (
                 // plants::grow,
                 plants::poll_grow_task.run_if(on_timer(Duration::from_millis(100))),
-                plants::kill,
+                // plants::kill,
                 // plants::position,
                 plants::width,
             ),

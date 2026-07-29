@@ -71,6 +71,7 @@ pub struct PlantData {
     attractors: bevy_spatial::kdtree::KDTree2<Attractor>,
     branches: Vec<(Entity, Branch)>,
     added: Vec<AddedBranch>,
+    killed: Vec<Instance<Attractor>>,
 }
 
 #[derive(Component)]
@@ -197,6 +198,26 @@ pub fn grow_task(mut data: PlantData) -> PlantData {
         }
     }
 
+    for (_, branch) in &data.branches {
+        let Some(direction) = branch.direction else {
+            continue;
+        };
+
+        let within = data.attractors.within_distance(
+            branch.pos + direction * branch.length,
+            data.params.attraction,
+        );
+        for (pos, entity) in within {
+            let Some(entity) = entity else {
+                continue;
+            };
+
+            if (branch.pos + direction * branch.length).distance(pos) < data.params.kill {
+                data.killed.push(Instance::from(entity));
+            }
+        }
+    }
+
     data
 }
 
@@ -216,6 +237,12 @@ pub fn poll_grow_task(
             let mut live = q_branch.get_mut(*entity).unwrap();
             live.length = branch.length;
             live.direction = branch.direction;
+        }
+
+        for attractor in data.killed.drain(..) {
+            if let Ok(mut entity) = commands.get_entity(attractor.entity) {
+                entity.despawn();
+            }
         }
 
         let mut finals = Vec::new();
@@ -449,6 +476,7 @@ pub fn spawn_root(
         attractors: tree,
         branches: vec![(branch_entity, branch)],
         added: Vec::new(),
+        killed: Vec::new(),
     };
 
     let thread_pool = AsyncComputeTaskPool::get();
